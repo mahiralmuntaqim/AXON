@@ -200,7 +200,7 @@ python -m venv .venv
 .venv/Scripts/activate            # Windows;  source .venv/bin/activate on POSIX
 pip install -r requirements.txt
 
-pytest axon/tests                 # 83 tests, fully offline (LLM + target are mocked)
+pytest axon/tests                 # 96 tests, fully offline (LLM + target are mocked)
 ```
 
 Run everything offline (mock model + mock target):
@@ -375,6 +375,60 @@ work. `Vulhub` remains a pure stub (no data was provided for it).
 3. subclass `BenchmarkHarnessBase` with a `_to_task(entry)` mapping;
 4. register it in `registry.py`.
 
+## Plug in any LLM (flexible API)
+
+The model is always **frozen** (inference only — no training), and every model call goes through
+one wrapper. [`axon/llm/backends.py`](axon/llm/backends.py) lets you point that wrapper at **any
+provider** from config or code. Keys are **always read from environment variables named in
+config — never hard-coded**.
+
+Set it in `axon/config/default.yaml` (or your own YAML):
+
+```yaml
+llm:
+  provider: openrouter                 # mock | openai | openrouter | anthropic | openai-compat | <registered>
+  model: anthropic/claude-3.7-sonnet
+  api_key_env: OPENROUTER_API_KEY      # the ENV VAR holding the key
+  temperature: 0.0
+  max_tokens: 1024
+```
+
+Built-in providers (all via one OpenAI-compatible or Anthropic path, stdlib only — no extra deps):
+
+| `provider` | Works with | Needs |
+|---|---|---|
+| `mock` | offline tests (default) | nothing |
+| `openai` | OpenAI | `OPENAI_API_KEY`, `model` |
+| `openrouter` | OpenRouter → Anthropic/OpenAI/… | `OPENROUTER_API_KEY`, `model` |
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY`, `model` |
+| `openai-compat` | Together, Groq, Fireworks, **local** (Ollama `/v1`, vLLM, LM Studio) | `base_url` (+ key if required) |
+
+```python
+from axon.config import load_config
+from axon.llm.client import LLMClient
+
+cfg = load_config()
+llm = LLMClient.from_config(cfg["llm"])     # builds the backend named by cfg["llm"]["provider"]
+```
+
+**Add any API you want** — two ways:
+
+```python
+from axon.llm.backends import CallableBackend, register_backend
+from axon.llm.client import LLMClient, LLMConfig
+
+# 1) wrap any function prompt -> text
+llm = LLMClient(CallableBackend(lambda p: my_api_call(p)), LLMConfig())
+
+# 2) register a named provider, then select it via `llm.provider: myco` in config
+register_backend("myco", lambda cfg: CallableBackend(lambda p: my_api_call(p, cfg["model"])))
+```
+
+> Already have a client? The `agent pentest` project's `security_agents/openrouter_client.py`
+> works out of the box via `provider: openrouter` (same `OPENROUTER_API_KEY`). To reuse that exact
+> client (with its retries/telemetry), wrap it:
+> `register_backend("openrouter-telemetry", lambda cfg: CallableBackend(lambda p: OpenRouterClient(...).complete(p).content))`.
+
 ## Project layout
 
 ```
@@ -383,14 +437,14 @@ axon/
   knowledge/    construct · provenance firewall · embeddings · packs loader
   memory/       read (dense + PPR + folding) · verify (the gate) · write · lessons
   planning/     search (PUCT) · reversibility (the safety gate)
-  llm/          frozen client (one call site) · prompt templates
+  llm/          frozen client (one call site) · prompts · flexible provider backends
   execution/    sandbox allowlist · tool runner · result types
   harness/      common benchmark interface · mock harness · benchmark stubs
   engagement/   the loop (Algorithm 1) · state/budget · events · replay · runner
   benchmark/    NYU CTF / AutoPenBench / Cybench / XBOW adapters + committed task indices
   eval/         metrics · experiment_a · experiment_b · baselines
   cli.py        construct / run / experiment-a / experiment-b / benchmarks / viz
-  tests/        83 offline tests
+  tests/        96 offline tests
 knowledge_packs/  six CTF/pentest packs (111 tools) — the graph's source content
 viz/              self-contained read-only visualizer (replay + live)
 ARCHITECTURE.md · STATUS.md
@@ -398,7 +452,7 @@ ARCHITECTURE.md · STATUS.md
 
 ## What is real vs. stubbed
 
-Everything above runs end to end **offline** — 83 tests pass, and the CLI solves the mock task,
+Everything above runs end to end **offline** — 96 tests pass, and the CLI solves the mock task,
 builds the real graph, and runs both experiments. The following are intentional, clearly-labeled
 stubs (see [STATUS.md](STATUS.md) for the full list); per the project's own rules, **no real
 benchmark is claimed to work until it has run a task end to end:**
@@ -428,8 +482,8 @@ Plus: the **visualizer is read-only** — removing it changes no result of a run
 
 - **Your own graph:** implement the `GraphBackend` protocol in `axon/graph/schema.py`;
   construction in `axon/knowledge/construct.py` is an interface to fill.
-- **Your own model:** point the one wrapper in `axon/llm/client.py` at an inference endpoint.
-  Nothing else changes.
+- **Your own model / API:** set `llm.provider` in config, or register a backend — see
+  [Plug in any LLM](#plug-in-any-llm-flexible-api). Nothing else changes.
 - **Your own embedder / tools / benchmark:** swap the embedder, implement `SubprocessBackend`,
   or add a harness adapter behind the common interface.
 

@@ -131,7 +131,10 @@ class LLMClient:
             seed=int(cfg.get("seed", 0)),
         )
         if backend is None:
-            backend = MockLLM() if llm_cfg.model == "mock" else FrozenRemoteLLM(llm_cfg.model)
+            # Flexible provider selection (openai/openrouter/anthropic/custom/mock).
+            from .backends import build_backend
+
+            backend = build_backend(cfg)
         return cls(backend, llm_cfg)
 
     def complete_text(self, prompt: str) -> str:

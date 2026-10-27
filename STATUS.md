@@ -1,6 +1,6 @@
 # AXON — Status & final check (SEGMENT 18)
 
-Last run: full suite **83 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
+Last run: full suite **96 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
 all execute end to end on the mock harness.
 
 **Knowledge content (SEGMENT 2/3):** `knowledge_packs/` (6 CTF categories, 111 curated tools)
@@ -41,7 +41,10 @@ deterministic pack loader and the `SourceDoc` adapter for the LLM `GraphConstruc
 These are intentionally unimplemented and labeled `STUB:` in code. Per SEGMENT 18, **no real
 benchmark is claimed to work** — only the mock harness has run a task end to end.
 
-- `llm/client.py::FrozenRemoteLLM` — wire to a real inference-only endpoint (no training).
+- LLM provider: a flexible API layer (`llm/backends.py`) ships real inference backends
+  (`openai` / `openrouter` / `anthropic` / `openai-compat` / custom-registered). They are real,
+  not stubs, but need an API key in the configured env var (and network). `mock` is the default
+  for offline runs; the old `FrozenRemoteLLM` placeholder is superseded.
 - `knowledge/embeddings.py::SentenceTransformerEmbedder` — real semantic embedder.
   (`HashingEmbedder` is real and used offline, but is not semantically strong.)
 - `execution/tools.py::SubprocessBackend` — real execution of allowlisted tools in a sandboxed

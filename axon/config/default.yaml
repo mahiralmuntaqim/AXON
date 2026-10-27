@@ -41,10 +41,25 @@ engagement:
   llm_retries: 3              # retries on LLM call failure/timeout before skipping the step
 
 llm:
-  model: mock                 # 'mock' for offline tests; real model id set per deployment
+  # Flexible API layer (axon/llm/backends.py). The model is always FROZEN — inference only.
+  provider: mock              # mock | openai | openrouter | anthropic | openai-compat | <registered>
+  model: mock                 # 'mock' for offline tests; a real model id per provider otherwise
   temperature: 0.0            # deterministic by default (reproducibility)
   timeout_s: 60
+  max_tokens: 1024
   seed: 0
+  # --- fields used by the real providers (keys ALWAYS come from env, never stored here) ---
+  # api_key_env: OPENROUTER_API_KEY   # name of the env var holding the key
+  # base_url: https://openrouter.ai/api/v1
+  # endpoint_path: /chat/completions
+  # extra_headers: {}
+  # system: null                      # optional system preamble
+  #
+  # Examples:
+  #   OpenRouter:  provider: openrouter, model: anthropic/claude-3.7-sonnet, api_key_env: OPENROUTER_API_KEY
+  #   OpenAI:      provider: openai,     model: gpt-4o-mini,                  api_key_env: OPENAI_API_KEY
+  #   Anthropic:   provider: anthropic,  model: claude-3-7-sonnet-latest,     api_key_env: ANTHROPIC_API_KEY
+  #   Local (Ollama): provider: openai-compat, model: llama3.1, base_url: http://localhost:11434/v1, api_key_env: null
 
 execution:
   # Sandbox allowlist. Only these target host patterns and tools may run. Nothing live,
