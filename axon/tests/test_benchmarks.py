@@ -77,3 +77,16 @@ def test_nyuctf_challenge_detail_when_data_present():
     assert detail is not None
     assert "name" in detail and "description" in detail
     assert "_networked" in detail  # tells the runner whether to bring up docker-compose
+
+
+@pytest.mark.parametrize("name", ["xbow", "cybench", "autopenbench"])
+def test_challenge_detail_when_data_present(name):
+    h = get_harness(name)
+    if h.data_root() is None:
+        pytest.skip(f"{name} data not located (set AXON_BENCH_ROOT)")
+    task = h.load_tasks()[0]
+    detail = h.challenge_detail(task)
+    assert detail is not None
+    assert "_networked" in detail
+    # Every adapter points at a concrete local folder for the challenge.
+    assert detail.get("_dir") or detail.get("_machine_dir")

@@ -338,6 +338,25 @@ h.data_root()                    # Path to the full challenge data, or None if n
 # h.start(task)                  # STUB: needs the full data + a container runtime (see below)
 ```
 
+**Full local task detail.** All four adapters expose `challenge_dir(task)` and
+`challenge_detail(task)`, which read each challenge's real descriptor from the data repo (so you
+can actually attempt a task). These carry flags / solution prompts and are therefore read
+**locally only** — never committed:
+
+```python
+h = get_harness("nyuctf")
+for task in h.load_tasks():
+    d = h.challenge_detail(task)          # None if the data isn't located
+    if d:
+        print(task.task_id, "| networked:", d["_networked"], "| dir:", d["_dir"])
+```
+
+What `challenge_detail(task)` returns per benchmark (plus `_dir`/`_machine_dir` and
+`_networked`): **nyuctf** → `challenge.json` (name, description, box, files, flag); **xbow** →
+`benchmark.json` (name, description, level, tags; canaries stripped); **cybench** →
+`metadata.json` (categories, difficulty, prompts, `target_host`, `_n_subtasks`); **autopenbench**
+→ the `games.json` entry (task, flag, target, vulnerability).
+
 Each task's `root_node_id` points at the matching knowledge-pack triage node
 (`web::triage`, `crypto::triage`, …) when its category maps to a pack, so retrieval seeds from
 the right place; network-pentest tasks (AutoPenBench) start from the generic `root` RECON node.
