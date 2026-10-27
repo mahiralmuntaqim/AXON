@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+
+# generated run artifacts
+events.jsonl
+*.events.jsonl
+scratch_*
+seed_graph.json
+final_graph.json
+snapshots/

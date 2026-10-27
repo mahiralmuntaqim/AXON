@@ -1,0 +1,75 @@
+# AXON configuration. All tunable numbers live here — nothing hard-coded in modules.
+
+graph:
+  # Beta-posterior prior for edge values Q = (n+ + alpha) / (n+ + n- + alpha + beta).
+  # alpha=beta=1 is a uniform prior => a fresh edge starts at Q=0.5.
+  alpha: 1.0
+  beta: 1.0
+  embedding_dim: 384          # dimensionality of technique-spec embeddings
+  q_clamp: true               # clamp Q/P into [0,1] on update instead of raising
+
+memory:
+  read:
+    dense_top_k: 24           # stage 1: nearest technique nodes by cosine similarity
+    ppr_alpha: 0.15           # personalized-PageRank restart probability (graph diffusion)
+    ppr_iterations: 50
+    frontier_cap: 16          # max techniques handed to the planner per step
+    max_lessons_per_node: 3   # only top-matching lessons are read back
+  match:
+    # Lesson/context match rule: same service AND same major version counts as a match.
+    version_granularity: major   # one of: exact | major | any
+  fold:
+    max_summary_chars: 800    # folded sub-trajectory summary cap; raw logs never enter context
+
+verify:
+  # A success must be backed by a real state transition in the trace.
+  require_state_transition: true
+
+planning:
+  c_puct: 1.4                 # exploration constant in the PUCT selection rule
+  backtrack_q_threshold: 0.2  # below this, abandon the branch and jump to best frontier node
+
+safety:
+  q_min: 0.6                  # irreversible actions only fire when Q(a) >= q_min
+  # Default reversibility when a technique's tag is unknown. Fail safe: treat as irreversible.
+  default_reversibility: irreversible
+
+engagement:
+  step_budget: 40             # max steps per engagement
+  cost_budget: 5.00           # max total action cost (dollars) per engagement
+  per_action_timeout_s: 120   # kill a hanging tool after this
+  llm_retries: 3              # retries on LLM call failure/timeout before skipping the step
+
+llm:
+  model: mock                 # 'mock' for offline tests; real model id set per deployment
+  temperature: 0.0            # deterministic by default (reproducibility)
+  timeout_s: 60
+  seed: 0
+
+execution:
+  # Sandbox allowlist. Only these target host patterns and tools may run. Nothing live,
+  # nothing third-party. See SEGMENT 10 / SEGMENT 12.
+  allow_web_search: false     # MUST stay false during evaluation (contamination channel)
+  allowed_target_hosts:
+    - "127.0.0.1"
+    - "localhost"
+    - "10.0.0.0/8"            # private lab ranges only
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  allowed_tools:              # known, documented tools only — no novel payload generation
+    - nmap
+    - curl
+    - gobuster
+    - nikto
+    - hydra
+    - sqlmap
+    - metasploit
+    - searchsploit
+
+eval:
+  seeds: [0, 1, 2]            # report variance across seeds
+  snapshot_dir: "snapshots"   # graph-state snapshots for reproducibility
+
+viz:
+  event_log_path: "events.jsonl"
+  live_port: 8765

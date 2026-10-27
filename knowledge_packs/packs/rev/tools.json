@@ -1,0 +1,33 @@
+{
+  "category": "rev",
+  "archetypes": ["ctf_reversing"],
+  "summary": "Reverse engineering: read a compiled program's logic to find the hidden answer (a check on input, an embedded flag, or a key-derivation). Workflow: identify the format/packing -> static read of the check -> dynamic confirm -> invert the check (by hand, or with angr/z3).",
+  "quick_triage": [
+    "file ./bin ; strings -n 6 ./bin | grep -iE 'flag|ctf|key|pass|correct|wrong'  (sometimes the flag is just there).",
+    "Detect packing: `file` says 'UPX'? high entropy? -> unpack first (upx -d).",
+    "Pick the right tool by format: native ELF/PE -> Ghidra/IDA/r2; .NET -> dnSpy/ILSpy; Java -> jadx/CFR; Android APK -> jadx/apktool; Python -> pyinstxtractor + decompyle3; wasm -> wasm2wat.",
+    "Find the comparison that gates success (strcmp, memcmp, custom loop). The flag is whatever makes it pass.",
+    "If input is transformed then compared to a constant, INVERT the transform. If the transform is complex, use angr or z3 to solve for the input.",
+    "Confirm dynamically: ltrace/strace, or gdb breakpoint on the compare to read the expected buffer."
+  ],
+  "tools": [
+    {"name": "Ghidra", "when": "Primary decompiler for native ELF/PE/Mach-O — free, scriptable.", "install": {"apt": "ghidra", "note": "or official release zip + JDK 17+"}, "usage": "Import -> analyze -> read decompiled function; rename vars; use the Script Manager for bulk work", "docs": "https://ghidra-sre.org/"},
+    {"name": "IDA Free", "when": "Alternative decompiler; great graph view (cloud decompiler in Free).", "install": {"note": "download from hex-rays.com (free edition)"}, "usage": "Open binary -> F5 for pseudocode", "docs": "https://hex-rays.com/ida-free/"},
+    {"name": "radare2 / rizin + Cutter", "when": "Scriptable CLI RE and a free GUI (Cutter) with decompiler plugins.", "install": {"apt": "radare2", "git": "https://github.com/rizinorg/cutter"}, "usage": "r2 -A ./bin; afl; pdf @ sym.main; Cutter for GUI", "docs": "https://book.rada.re/"},
+    {"name": "gdb + pwndbg/gef", "when": "Dynamic analysis: breakpoint the check, read registers/memory, patch live.", "install": {"git": "https://github.com/pwndbg/pwndbg"}, "usage": "gdb ./bin; b *cmp_addr; run; x/s $rsi", "docs": "https://github.com/pwndbg/pwndbg"},
+    {"name": "ltrace / strace", "when": "See library/syscalls at runtime — often reveals strcmp(input, FLAG) directly.", "install": {"apt": "ltrace strace"}, "usage": "ltrace ./bin ; strace -f ./bin", "docs": "https://man7.org/linux/man-pages/man1/ltrace.1.html"},
+    {"name": "angr", "when": "Symbolic execution: auto-find the input that reaches 'Correct' — the rev workhorse for keygen-style checks.", "install": {"pip": "angr"}, "usage": "p=angr.Project('./bin'); sm=p.factory.simulation_manager(state); sm.explore(find=win,avoid=lose)", "docs": "https://docs.angr.io/"},
+    {"name": "z3-solver", "when": "Model a constraint check (XOR/arith loops) and solve for the flag bytes.", "install": {"pip": "z3-solver"}, "usage": "from z3 import *; s=Solver(); s.add(...); s.check(); s.model()", "docs": "https://github.com/Z3Prover/z3"},
+    {"name": "upx", "when": "Unpack UPX-packed binaries before analysis.", "install": {"apt": "upx-ucl"}, "usage": "upx -d ./bin", "docs": "https://upx.github.io/"},
+    {"name": "dnSpy / ILSpy", "when": ".NET assemblies — full decompile + live edit/debug (dnSpy on Windows; ILSpy/ilspycmd cross-platform).", "install": {"note": "dnSpyEx release; or `dotnet tool install ilspycmd -g`"}, "usage": "Open .exe/.dll -> read C#; dnSpy can edit+save to bypass checks", "docs": "https://github.com/dnSpyEx/dnSpy"},
+    {"name": "jadx", "when": "Android APK / Java — decompile DEX/JAR to readable Java.", "install": {"apt": "jadx", "git": "https://github.com/skylot/jadx"}, "usage": "jadx -d out app.apk ; or jadx-gui", "docs": "https://github.com/skylot/jadx"},
+    {"name": "apktool", "when": "Disassemble/rebuild APK resources + smali (for patching).", "install": {"apt": "apktool"}, "usage": "apktool d app.apk ; apktool b app", "docs": "https://apktool.org/"},
+    {"name": "CFR / procyon", "when": "Java .class/.jar decompilers (fallback to jadx).", "install": {"note": "download cfr.jar"}, "usage": "java -jar cfr.jar app.jar --outputdir out", "docs": "https://www.benf.org/other/cfr/"},
+    {"name": "pyinstxtractor + decompyle3/uncompyle6", "when": "PyInstaller exe or .pyc back to Python source.", "install": {"pip": "decompyle3 uncompyle6", "git": "https://github.com/extremecoders-re/pyinstxtractor"}, "usage": "python pyinstxtractor.py app.exe ; decompyle3 main.pyc", "docs": "https://github.com/extremecoders-re/pyinstxtractor"},
+    {"name": "frida", "when": "Dynamic instrumentation: hook functions at runtime, dump args/return (mobile + native).", "install": {"pip": "frida-tools"}, "usage": "frida-trace -i 'strcmp' ./bin", "docs": "https://frida.re/docs/"},
+    {"name": "binwalk", "when": "Firmware / embedded blobs: find and extract filesystems and nested binaries.", "install": {"apt": "binwalk"}, "usage": "binwalk -e firmware.bin", "docs": "https://github.com/ReFirmLabs/binwalk"},
+    {"name": "Binary Ninja", "when": "Strong decompiler/analysis with a clean Python API (free cloud tier); good when Ghidra's output is messy.", "install": {"note": "binary.ninja (free cloud + paid desktop)"}, "usage": "open binary -> HLIL/decompiler; scriptable via Python API", "docs": "https://binary.ninja/"},
+    {"name": "Androguard", "when": "Reverse-engineer Android APKs programmatically (DEX analysis, call graphs).", "install": {"pip": "androguard"}, "usage": "androguard decompile app.apk", "docs": "https://github.com/androguard/androguard"},
+    {"name": "Krakatau", "when": "Java bytecode decompiler + disassembler (alternative to jadx/CFR).", "install": {"git": "https://github.com/Storyyeller/Krakatau"}, "usage": "krakatau decompile app.jar", "docs": "https://github.com/Storyyeller/Krakatau"}
+  ]
+}

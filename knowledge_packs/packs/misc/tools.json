@@ -1,0 +1,29 @@
+{
+  "category": "misc",
+  "archetypes": ["misc"],
+  "summary": "Mixed/unusual tasks that don't fit the other five: jail escapes (pyjail/bash/jail), encoding puzzles, programming/PPC (fast automated solving of many rounds), esoteric languages, QR/barcodes, scripting, and light OSINT. Workflow: classify the sub-genre, then apply its standard trick.",
+  "quick_triage": [
+    "Read the prompt/source carefully — misc tasks telegraph their genre (a prompt loop over netcat = PPC; a restricted eval = pyjail; weird glyphs = esolang/encoding).",
+    "Interactive service (nc host port)? Script it with pwntools: connect, parse the challenge, compute, send answer, loop.",
+    "Jail (python/bash with filtered input)? Enumerate what's blocked, then find an equivalent that isn't.",
+    "Unknown blob/text? Identify encoding (CyberChef Magic, `file`, base-N, esolang fingerprints).",
+    "Image of a code? zbarimg (QR/barcode). Grid of glyphs? maybe Braille/semaphore/flag-semaphore.",
+    "OSINT? pivot from the given handle/email/image across public sources."
+  ],
+  "tools": [
+    {"name": "pwntools", "when": "Any interactive netcat service: automate connect/parse/compute/send over many rounds (PPC, proof-of-work, guessing games).", "install": {"pip": "pwntools"}, "usage": "from pwn import *; io=remote('host',port); io.recvuntil(b'=')", "docs": "https://docs.pwntools.com/"},
+    {"name": "python3", "when": "The universal solver for logic/PPC/encoding/jail payloads.", "install": {"apk": "python3"}, "usage": "python3 -c '...' ; often the whole solve is one script", "docs": "https://docs.python.org/3/"},
+    {"name": "CyberChef (Magic)", "when": "Identify + peel multi-layer encodings (base64/32/85, hex, URL, ROT, charcodes).", "install": {"note": "web app; offline static build or gchq.github.io/CyberChef"}, "usage": "Magic recipe; or From Base64 chains", "docs": "https://gchq.github.io/CyberChef/"},
+    {"name": "zbarimg", "when": "Decode QR codes / barcodes.", "install": {"apt": "zbar-tools"}, "usage": "zbarimg image.png", "docs": "https://github.com/mchehab/zbar"},
+    {"name": "z3-solver", "when": "Constraint/logic puzzles, SAT-style challenges, solving for inputs.", "install": {"pip": "z3-solver"}, "usage": "from z3 import *", "docs": "https://github.com/Z3Prover/z3"},
+    {"name": "hashcat / john", "when": "Proof-of-work (find a suffix with N leading zero bits) and hash puzzles.", "install": {"apt": "hashcat john"}, "usage": "often a short python loop hashing candidates is simpler than hashcat here", "docs": "https://hashcat.net/wiki/"},
+    {"name": "socat / nc", "when": "Talk to raw services; bridge/relay; test interactive protocols.", "install": {"apk": "socat netcat-openbsd"}, "usage": "nc host port ; socat - TCP:host:port", "docs": "http://www.dest-unreach.org/socat/"},
+    {"name": "esolang interpreters (Brainfuck/Whitespace/Piet/Malbolge)", "when": "Source is an esoteric language — identify by its characteristic glyphs and run it.", "install": {"note": "online interpreters (tio.run) or pip brainfuck/whitespace tools"}, "usage": "tio.run supports most esolangs; or a tiny python BF interpreter", "docs": "https://esolangs.org/"},
+    {"name": "sherlock / holehe (OSINT)", "when": "Light OSINT: find a username across sites / check email registrations.", "install": {"pip": "sherlock-project holehe"}, "usage": "sherlock <username> ; holehe <email>", "docs": "https://github.com/sherlock-project/sherlock"},
+    {"name": "exiftool", "when": "OSINT/misc on a provided media file (GPS, device, timestamps).", "install": {"apt": "libimage-exiftool-perl"}, "usage": "exiftool file", "docs": "https://exiftool.org/"},
+    {"name": "jd-gui / standard decoders", "when": "Quick decode of odd formats; keep a scratch python with base58/base62/ascii85/baconian helpers.", "install": {"pip": "base58 pybase62"}, "usage": "python3 -c 'import base58;print(base58.b58decode(s))'", "docs": "https://pypi.org/project/base58/"},
+    {"name": "hydra", "when": "Brute-force a login/guessing service when the misc task is a credential/PIN gate.", "install": {"apt": "hydra"}, "usage": "hydra -l user -P rockyou.txt ssh://T", "docs": "https://github.com/vanhauser-thc/thc-hydra"},
+    {"name": "patator", "when": "Flexible, modular brute-forcer when hydra's modules don't fit the protocol.", "install": {"pip": "patator"}, "usage": "patator http_fuzz url=http://T/ method=POST body='pin=FILE0' 0=pins.txt", "docs": "https://github.com/lanjelot/patator"},
+    {"name": "GTFOBins (reference)", "when": "Jail/privesc: look up how an allowed binary can read files, write, or spawn a shell.", "install": {"note": "reference site; harvested index at ./harvested/gtfobins-list.txt"}, "usage": "find your binary at gtfobins.github.io -> use its shell/file-read gadget", "docs": "https://gtfobins.github.io/"}
+  ]
+}

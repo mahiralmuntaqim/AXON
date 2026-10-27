@@ -1,0 +1,32 @@
+{
+  "category": "pwn",
+  "archetypes": ["ctf_pwn"],
+  "summary": "Binary exploitation: abuse a memory-safety bug in a program to hijack control flow or leak memory, usually to get a shell or read the flag. Workflow: triage protections -> find the bug -> build the primitive -> defeat mitigations -> exploit with pwntools.",
+  "quick_triage": [
+    "checksec ./binary  -> which mitigations are on (Canary, NX, PIE, RELRO).",
+    "file ./binary and `./binary` once to see behavior; find the input that reaches the bug.",
+    "Decompile in Ghidra/radare2 to locate the vulnerable function (gets, read with bad size, printf(user), malloc/free pattern).",
+    "Identify bug class: stack overflow / format string / heap / integer / off-by-one.",
+    "Is libc provided? note its version (strings libc | grep 'GLIBC_') — it decides gadgets/one_gadget offsets.",
+    "Build + test the exploit LOCALLY against the provided binary before firing at remote."
+  ],
+  "tools": [
+    {"name": "pwntools", "when": "Every exploit — I/O, packing, ROP, shellcode, ELF/libc symbol lookup.", "install": {"pip": "pwntools"}, "usage": "from pwn import *; p=process('./chall'); p.sendline(payload); p.interactive()", "docs": "https://docs.pwntools.com/"},
+    {"name": "gdb + pwndbg", "when": "Dynamic analysis: inspect crash, stack, heap, find offsets.", "install": {"git": "https://github.com/pwndbg/pwndbg (./setup.sh)"}, "usage": "gdb ./chall; pwndbg> cyclic 200; run; pwndbg> search-pattern; cyclic -l <val>", "docs": "https://github.com/pwndbg/pwndbg"},
+    {"name": "GEF (gdb enhanced)", "when": "Alternative to pwndbg; great heap/format-string helpers.", "install": {"git": "https://github.com/hugsy/gef"}, "usage": "gef> checksec; gef> pattern create 200; gef> pattern search", "docs": "https://hugsy.github.io/gef/"},
+    {"name": "checksec", "when": "First look: which mitigations are enabled.", "install": {"pip": "pwntools (checksec ships with it)", "apt": "checksec"}, "usage": "checksec --file=./chall", "docs": "https://docs.pwntools.com/en/stable/commandline.html"},
+    {"name": "ROPgadget", "when": "Find ROP gadgets (pop rdi, syscall, etc.).", "install": {"pip": "ROPgadget"}, "usage": "ROPgadget --binary ./chall | grep ': pop rdi'", "docs": "https://github.com/JonathanSalwan/ROPgadget"},
+    {"name": "ropper", "when": "Alternative gadget finder + ropchain builder; good search syntax.", "install": {"pip": "ropper"}, "usage": "ropper -f ./chall --search 'pop rdi; ret'", "docs": "https://github.com/sashs/Ropper"},
+    {"name": "one_gadget", "when": "Find single-shot execve('/bin/sh') gadgets in a libc.", "install": {"gem": "one_gadget"}, "usage": "one_gadget ./libc.so.6", "docs": "https://github.com/david942j/one_gadget"},
+    {"name": "libc-database", "when": "Identify remote libc from leaked symbol offsets; get base + gadget offsets.", "install": {"git": "https://github.com/niklasb/libc-database"}, "usage": "./find printf 760  system 420  -> candidate libc; ./dump <id>", "docs": "https://github.com/niklasb/libc-database"},
+    {"name": "patchelf", "when": "Make a provided libc/loader run with the binary locally for accurate testing.", "install": {"apt": "patchelf"}, "usage": "patchelf --set-interpreter ./ld.so --set-rpath . ./chall", "docs": "https://github.com/NixOS/patchelf"},
+    {"name": "seccomp-tools", "when": "Dump a binary's seccomp filter (which syscalls are allowed) — decides ORW vs shell.", "install": {"gem": "seccomp-tools"}, "usage": "seccomp-tools dump ./chall", "docs": "https://github.com/david942j/seccomp-tools"},
+    {"name": "Ghidra", "when": "Decompile to C to understand the vulnerable logic quickly.", "install": {"apt": "ghidra", "note": "or download the release zip; needs JDK"}, "usage": "Import binary -> auto-analyze -> read decompiled main()", "docs": "https://ghidra-sre.org/"},
+    {"name": "radare2 / rizin", "when": "Fast CLI static+dynamic analysis, scriptable.", "install": {"apt": "radare2", "git": "https://github.com/radareorg/radare2"}, "usage": "r2 -A ./chall; [0x..]> afl; pdf @ main", "docs": "https://book.rada.re/"},
+    {"name": "angr", "when": "Symbolic execution: auto-solve input constraints, find path to win().", "install": {"pip": "angr"}, "usage": "proj=angr.Project('./chall'); explore to find(addr) avoid(addr)", "docs": "https://docs.angr.io/"},
+    {"name": "objdump / readelf / nm", "when": "Quick static look: sections, symbols, PLT/GOT, disassembly.", "install": {"apk": "binutils"}, "usage": "objdump -d -M intel ./chall | less", "docs": "https://sourceware.org/binutils/docs/"},
+    {"name": "PEDA", "when": "gdb enhancement for exploit dev (alternative to pwndbg/GEF).", "install": {"git": "https://github.com/longld/peda"}, "usage": "echo 'source ~/peda/peda.py' >> ~/.gdbinit; gdb ./chall", "docs": "https://github.com/longld/peda"},
+    {"name": "libformatstr", "when": "Build format-string write payloads quickly (helper library).", "install": {"git": "https://github.com/hellman/libformatstr"}, "usage": "from libformatstr import FormatStr", "docs": "https://github.com/hellman/libformatstr"},
+    {"name": "Triton", "when": "Dynamic binary analysis / symbolic execution when angr struggles on a concrete trace.", "install": {"pip": "triton-library"}, "usage": "load a trace and solve path constraints symbolically", "docs": "https://github.com/JonathanSalwan/Triton"}
+  ]
+}

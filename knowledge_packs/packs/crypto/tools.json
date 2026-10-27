@@ -1,0 +1,35 @@
+{
+  "category": "crypto",
+  "archetypes": ["ctf_crypto"],
+  "summary": "Break or exploit a cipher/protocol to recover a secret. Identify the primitive (RSA / AES / XOR / classical / ECC / hash / PRNG), then apply the matching attack. Most CTF crypto is a known textbook weakness, not novel cryptanalysis.",
+  "quick_triage": [
+    "Read ALL provided files (source .py, params, ciphertext, public key). The vuln is almost always visible in the handrolled code.",
+    "Identify the primitive: openssl asn1parse / rsa -pubin -text for keys; `file` and entropy for blobs; look for n,e,c (RSA), iv/mode (AES), repeating-key patterns (XOR).",
+    "RSA: feed the public key to RsaCtfTool --attack all; check factordb for n.",
+    "Unknown number/bytes: CyberChef 'Magic', or try base64/hex/decimal decode chains first.",
+    "If an oracle/service is given (padding, LSB, length-extension), the attack is interactive — script it with pwntools/requests."
+  ],
+  "tools": [
+    {"name": "python3 + pycryptodome", "when": "Scripting every crypto attack; AES/RSA/hash primitives.", "install": {"pip": "pycryptodome"}, "usage": "from Crypto.Util.number import long_to_bytes, inverse, GCD", "docs": "https://pycryptodome.readthedocs.io/"},
+    {"name": "gmpy2", "when": "Fast bignum math: iroot, gcd, invert for RSA attacks.", "install": {"pip": "gmpy2", "apk": "gmpy2 (needs gmp-dev mpfr-dev mpc1-dev)"}, "usage": "import gmpy2; gmpy2.iroot(c, e)", "docs": "https://gmpy2.readthedocs.io/"},
+    {"name": "sympy", "when": "Factoring, discrete log (small), modular arithmetic, symbolic.", "install": {"pip": "sympy"}, "usage": "from sympy import factorint, discrete_log", "docs": "https://docs.sympy.org/"},
+    {"name": "RsaCtfTool", "when": "RSA with weak/attackable params — the first thing to try on any RSA key.", "install": {"git": "https://github.com/RsaCtfTool/RsaCtfTool"}, "usage": "python3 RsaCtfTool.py --publickey key.pub --uncipherfile cipher.bin --attack all", "docs": "https://github.com/RsaCtfTool/RsaCtfTool"},
+    {"name": "SageMath", "when": "Heavy algebra: lattices (LLL/Coppersmith), ECC, DLP, polynomial rings. The crypto power tool.", "install": {"apt": "sagemath", "note": "large; use a sage docker image or cloud (cocalc) if the sandbox can't build it"}, "usage": "sage -c 'print(matrix(ZZ,[[...]]).LLL())'", "docs": "https://doc.sagemath.org/"},
+    {"name": "factordb (lookup)", "when": "Any RSA modulus n — may already be factored in the public DB.", "install": {"pip": "factordb-pycli"}, "usage": "from factordb.factordb import FactorDB; f=FactorDB(n); f.connect(); f.get_factor_list()", "docs": "http://factordb.com/"},
+    {"name": "yafu", "when": "Offline factoring of medium moduli (SIQS/ECM) when factordb misses.", "install": {"git": "https://github.com/bbuhrow/yafu"}, "usage": "echo 'factor(N)' | ./yafu", "docs": "https://github.com/bbuhrow/yafu"},
+    {"name": "xortool", "when": "Repeating-key XOR: recover key length and key.", "install": {"pip": "xortool"}, "usage": "xortool -x -c 20 cipher.hex", "docs": "https://github.com/hellman/xortool"},
+    {"name": "hashcat", "when": "Crack password hashes / weak key derivations (GPU).", "install": {"apt": "hashcat"}, "usage": "hashcat -m 0 -a 0 hashes.txt rockyou.txt", "docs": "https://hashcat.net/wiki/"},
+    {"name": "john (John the Ripper)", "when": "Crack hashes, and *2john converters for encrypted files/keys.", "install": {"apt": "john"}, "usage": "ssh2john id_rsa > h; john --wordlist=rockyou.txt h", "docs": "https://www.openwall.com/john/"},
+    {"name": "hash-identifier / hashid", "when": "Identify an unknown hash type before cracking.", "install": {"pip": "hashid"}, "usage": "hashid '5f4dcc3b5aa765d61d8327deb882cf99'", "docs": "https://github.com/psypanda/hashID"},
+    {"name": "hashpumpy / hash_extender", "when": "Hash length-extension attacks (MD5/SHA1/SHA2 MACs built as hash(secret||msg)).", "install": {"pip": "hashpumpy", "git": "https://github.com/iagox86/hash_extender"}, "usage": "import hashpumpy; hashpumpy.hashpump(sig, data, append, keylen)", "docs": "https://github.com/iagox86/hash_extender"},
+    {"name": "z3-solver", "when": "Constraint solving: break custom/LCG PRNGs, linear cipher systems.", "install": {"pip": "z3-solver"}, "usage": "from z3 import *", "docs": "https://github.com/Z3Prover/z3"},
+    {"name": "randcrack / mersenne predictor", "when": "Predict Python random / MT19937 after observing 624 outputs.", "install": {"pip": "randcrack"}, "usage": "from randcrack import RandCrack", "docs": "https://github.com/tna0y/Python-random-module-cracker"},
+    {"name": "openssl", "when": "Parse keys/certs, quick enc/dec, inspect ASN.1.", "install": {"apk": "openssl"}, "usage": "openssl rsa -pubin -in key.pub -text -noout", "docs": "https://docs.openssl.org/"},
+    {"name": "CyberChef (reference, offline build)", "when": "Rapid decode/encoding-chain discovery, 'Magic' detector, classical ciphers.", "install": {"note": "web app; host the static build offline or use gchq.github.io/CyberChef"}, "usage": "Magic / From Base64 / XOR Brute Force recipes", "docs": "https://gchq.github.io/CyberChef/"},
+    {"name": "FeatherDuster", "when": "Automated, modular cryptanalysis — quick first pass to detect cipher/encoding and known weaknesses.", "install": {"git": "https://github.com/nccgroup/featherduster"}, "usage": "featherduster cipher.txt", "docs": "https://github.com/nccgroup/featherduster"},
+    {"name": "rsatool", "when": "Generate an RSA private key once you know p and q (or reconstruct d/n).", "install": {"git": "https://github.com/ius/rsatool"}, "usage": "python3 rsatool.py -p P -q Q -o key.pem", "docs": "https://github.com/ius/rsatool"},
+    {"name": "padding-oracle-attacker", "when": "Run a CBC padding-oracle attack from the CLI against a live oracle.", "install": {"npm": "padding-oracle-attacker"}, "usage": "poattack http://T/decrypt HEXCIPHER 16 -e hex", "docs": "https://github.com/KishanBagaria/padding-oracle-attacker"},
+    {"name": "PkCrack", "when": "Break legacy ZipCrypto (pkzip) with a known-plaintext file from the archive.", "install": {"git": "https://github.com/keyunluo/pkcrack"}, "usage": "pkcrack -C enc.zip -c file -P plain.zip -p file -d out.zip", "docs": "https://www.unix-ag.uni-kl.de/~conrad/krypto/pkcrack.html"},
+    {"name": "quipqiup", "when": "Auto-solve substitution / Vigenere ciphers without a key.", "install": {"note": "online tool"}, "usage": "paste ciphertext at quipqiup.com", "docs": "https://quipqiup.com/"}
+  ]
+}

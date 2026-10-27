@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AXON Graph Viewer</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#30363d;
+    --recon:#58a6ff; --enum:#3fb950; --exploit:#f85149; --privesc:#d29922;
+    --lateral:#bc8cff; --exfil:#ff7b72; --accent:#ffd33d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+       background:var(--bg);color:var(--ink);overflow:hidden}
+  #wrap{display:flex;height:100vh}
+  canvas{flex:1;display:block;cursor:grab}
+  #side{width:320px;background:var(--panel);border-left:1px solid var(--line);
+        padding:12px;overflow:auto}
+  h1{font-size:15px;margin:0 0 8px}
+  .row{display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap}
+  button,input[type=file],select{background:#21262d;color:var(--ink);border:1px solid var(--line);
+         border-radius:6px;padding:5px 8px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  input[type=range]{width:100%}
+  .legend span{display:inline-flex;align-items:center;gap:4px;margin:2px 8px 2px 0}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .meter{height:8px;background:#21262d;border-radius:4px;overflow:hidden;margin-top:2px}
+  .meter>i{display:block;height:100%;background:var(--accent)}
+  #tip{position:absolute;pointer-events:none;background:#0d1117ee;border:1px solid var(--line);
+       border-radius:6px;padding:6px 8px;max-width:260px;display:none;z-index:9}
+  .k{color:var(--muted)} .ev{color:var(--muted);font-size:12px;max-height:160px;overflow:auto}
+  .pill{font-size:11px;padding:1px 6px;border:1px solid var(--line);border-radius:10px;color:var(--muted)}
+  code{color:var(--accent)}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="side">
+    <h1>AXON Graph Viewer <span class="pill">read-only</span></h1>
+    <div class="row">
+      <label>Replay log <input type="file" id="file" accept=".jsonl,.json,.txt" /></label>
+    </div>
+    <div class="row">
+      <button id="live">Connect live</button>
+      <input id="liveUrl" value="http://localhost:8765/stream" style="flex:1" />
+    </div>
+    <div class="row">
+      <button id="play">▶ Play</button>
+      <button id="step">⏭ Step</button>
+      <button id="back">⏮ Back</button>
+      <label>speed <select id="speed">
+        <option>0.5</option><option selected>1</option><option>2</option><option>4</option>
+      </select></label>
+    </div>
+    <div class="row"><input type="range" id="scrub" min="0" max="0" value="0" /></div>
+    <div class="row">
+      <span class="pill">step <b id="stepN">0</b></span>
+      <span class="pill">cost <b id="costN">0</b></span>
+      <span class="pill">event <b id="evIdx">0</b>/<b id="evTot">0</b></span>
+    </div>
+    <div class="meter"><i id="budgetBar" style="width:0%"></i></div>
+    <div class="legend row" style="margin-top:10px">
+      <span><i class="dot" style="background:var(--recon)"></i>RECON</span>
+      <span><i class="dot" style="background:var(--enum)"></i>ENUM</span>
+      <span><i class="dot" style="background:var(--exploit)"></i>EXPLOIT</span>
+      <span><i class="dot" style="background:var(--privesc)"></i>PRIVESC</span>
+      <span><i class="dot" style="background:var(--lateral)"></i>LATERAL</span>
+      <span><i class="dot" style="background:var(--exfil)"></i>EXFIL</span>
+    </div>
+    <div class="k" style="margin-top:6px">edges: PRECONDITION solid · ENABLES dashed ·
+      ALTERNATIVE dotted · REFINES double — thickness/brightness = learned Q (faint = prior P)</div>
+    <div class="k" style="margin-top:6px">🔒 = irreversible technique (safety-gated)</div>
+    <h1 style="font-size:13px;margin-top:12px">Episodic (target map)</h1>
+    <div id="epi" class="ev"></div>
+    <h1 style="font-size:13px;margin-top:12px">Event log</h1>
+    <div id="log" class="ev"></div>
+  </div>
+</div>
+<div id="tip"></div>
+<script>
+// ============================================================================================
+// AXON visualizer — READ ONLY. It consumes the event stream and draws it. It never writes to
+// either graph and never influences a decision. Force-directed layout on canvas (not SVG) so
+// large graphs stay smooth; events are buffered and applied once per animation frame.
+// ============================================================================================
+const TYPE_COLORS = {RECON:'#58a6ff',ENUM:'#3fb950',EXPLOIT:'#f85149',PRIVESC:'#d29922',
+                     LATERAL:'#bc8cff',EXFIL:'#ff7b72'};
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+let W=0,H=0;
+function resize(){W=canvas.width=canvas.clientWidth*devicePixelRatio;
+  H=canvas.height=canvas.clientHeight*devicePixelRatio;}
+window.addEventListener('resize',resize); resize();
+
+// ---- model (built only from events) --------------------------------------------------------
+let nodes=new Map(), edges=new Map();     // id->{...}, key->{...}
+let episodic=[];                           // discovered facts (from new_facts if emitted)
+let highlight={frontier:new Set(),selEdge:null,execNode:null,lastWrite:null,backtrack:null};
+
+function resetModel(){nodes=new Map();edges=new Map();episodic=[];
+  highlight={frontier:new Set(),selEdge:null,execNode:null,lastWrite:null,backtrack:null};}
+
+function ensureNode(id,type,reversible){
+  if(!nodes.has(id)){
+    nodes.set(id,{id,type:type||'RECON',reversible:reversible!==false,
+      x:W/2+(Math.random()-0.5)*200, y:H/2+(Math.random()-0.5)*200, vx:0,vy:0,
+      born:performance.now(), np:0,nm:0, lessons:[]});
+  } else if(type){nodes.get(id).type=type; nodes.get(id).reversible=reversible!==false;}
+  return nodes.get(id);
+}
+function edgeKey(a){return a.join('|');}
+function ensureEdge(src,dst,etype,Q,P){
+  const k=edgeKey([src,dst,etype]);
+  if(!edges.has(k)) edges.set(k,{src,dst,etype,Q:Q??0.5,dispQ:Q??0.5,P:P??0.5,targetQ:Q??0.5});
+  return edges.get(k);
+}
+
+// ---- apply one event (the only way the picture changes) ------------------------------------
+function applyEvent(ev){
+  const p=ev.payload||{};
+  switch(ev.type){
+    case 'snapshot':
+      resetModel();
+      (p.nodes||[]).forEach(n=> typeof n==='object'?ensureNode(n.id,n.type,n.reversible):ensureNode(n));
+      (p.edges||[]).forEach(e=> ensureEdge(e[0],e[1],e[2],e[3],e[4]));
+      break;
+    case 'read':
+      highlight.frontier=new Set(p.frontier||[]); break;
+    case 'select':
+      if(p.edge){highlight.selEdge=edgeKey(p.edge);
+        const e=edges.get(highlight.selEdge); if(e){e.P=p.P??e.P;}} break;
+    case 'execute':
+      highlight.execNode=p.node; if(p.node)ensureNode(p.node).lock=p.irreversible; break;
+    case 'write':
+      if(p.edge){const e=ensureEdge(p.edge[0],p.edge[1],p.edge[2]);
+        if(p.new_Q!=null){e.targetQ=p.new_Q;}            // animate dispQ -> targetQ
+        if(p.lesson){const n=nodes.get(p.edge[1]); if(n)n.lessons.push(p.lesson);} }
+      highlight.lastWrite=p.edge?edgeKey(p.edge):null; break;
+    case 'backtrack':
+      highlight.backtrack=p.to_node; break;
+    case 'budget':
+      document.getElementById('stepN').textContent=p.steps_used??'0';
+      document.getElementById('costN').textContent=(p.cost_used??0).toFixed(3);
+      break;
+  }
+  if(p.verified===false && p.blocked){ pushEpi('⛔ blocked: '+p.blocked); }
+  document.getElementById('stepN').textContent=ev.step;
+}
+function pushEpi(s){episodic.push(s); if(episodic.length>40)episodic.shift();}
+
+// ---- replay controller ---------------------------------------------------------------------
+let allEvents=[], cursor=0, playing=false, speed=1, lastTick=0;
+function loadEvents(list){allEvents=list; cursor=0; resetModel();
+  document.getElementById('scrub').max=list.length;
+  document.getElementById('evTot').textContent=list.length; seekTo(0);}
+function seekTo(i){ // rebuild from start to i (snapshots are cheap here)
+  resetModel(); i=Math.max(0,Math.min(i,allEvents.length));
+  for(let k=0;k<i;k++) applyEvent(allEvents[k]);
+  // snap edge display to target when scrubbing so it isn't mid-animation
+  edges.forEach(e=>{e.dispQ=e.targetQ;});
+  cursor=i; renderLog(); syncUI();
+}
+function stepFwd(){ if(cursor<allEvents.length){applyEvent(allEvents[cursor++]); renderLog(); syncUI();} }
+function syncUI(){document.getElementById('scrub').value=cursor;
+  document.getElementById('evIdx').textContent=cursor;
+  const last=[...episodic].slice(-30).map(e=>'· '+e).join('<br>');
+  document.getElementById('epi').innerHTML=last||'<span class=k>no findings yet</span>';
+  const bb=Math.min(100,(Number(document.getElementById('costN').textContent)||0)/5*100);
+  document.getElementById('budgetBar').style.width=bb+'%';}
+function renderLog(){const el=document.getElementById('log');
+  const slice=allEvents.slice(Math.max(0,cursor-12),cursor).reverse();
+  el.innerHTML=slice.map(e=>{
+    let extra=''; const p=e.payload||{};
+    if(e.type==='select')extra=` <code>${(p.edge||[]).join('→')}</code> Q=${(p.Q??0).toFixed(2)}`;
+    if(e.type==='write')extra=` Q ${(p.old_Q??0).toFixed(2)}→${(p.new_Q??0).toFixed(2)}`;
+    if(e.type==='verify')extra=` ${p.outcome||''} ${p.attribution||''}`;
+    if(e.type==='execute')extra=` ${p.node||''}${p.irreversible?' 🔒':''}`;
+    return `<div><span class=k>[${e.step}]</span> <b>${e.type}</b>${extra}</div>`;
+  }).join('');}
+
+// ---- buffered live feed --------------------------------------------------------------------
+let liveBuf=[];
+function connectLive(url){
+  try{
+    const es=new EventSource(url);
+    es.onmessage=(m)=>{ try{liveBuf.push(JSON.parse(m.data));}catch(_){} };
+    es.onerror=()=>{ pushEpi('live stream error'); };
+    playing=true;
+  }catch(e){ alert('live connect failed: '+e); }
+}
+function drainLive(){ // apply at most a batch per frame (events can outpace the screen)
+  if(liveBuf.length){ const batch=liveBuf.splice(0,Math.min(liveBuf.length,20));
+    batch.forEach(ev=>{allEvents.push(ev); applyEvent(ev); cursor=allEvents.length;});
+    document.getElementById('evTot').textContent=allEvents.length; renderLog(); syncUI(); } }
+
+// ---- force layout + render -----------------------------------------------------------------
+function physics(){
+  const arr=[...nodes.values()];
+  for(const n of arr){n.vx*=0.85;n.vy*=0.85;}
+  for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){
+    const a=arr[i],b=arr[j];let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy||1;
+    const f=1200*devicePixelRatio*devicePixelRatio/d2; const d=Math.sqrt(d2);
+    a.vx+=f*dx/d;a.vy+=f*dy/d;b.vx-=f*dx/d;b.vy-=f*dy/d;}
+  for(const e of edges.values()){const a=nodes.get(e.src),b=nodes.get(e.dst);if(!a||!b)continue;
+    let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1,rest=140*devicePixelRatio;
+    const f=(d-rest)*0.01; a.vx+=f*dx/d;a.vy+=f*dy/d;b.vx-=f*dx/d;b.vy-=f*dy/d;}
+  for(const n of arr){ // gentle pull to center
+    n.vx+=(W/2-n.x)*0.0008; n.vy+=(H/2-n.y)*0.0008; n.x+=n.vx; n.y+=n.vy;}
+}
+function lineStyle(etype){ // edge type -> dash pattern
+  return {PRECONDITION:[],ENABLES:[8,6],ALTERNATIVE:[2,5],REFINES:[12,4,2,4]}[etype]||[];}
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // edges
+  for(const e of edges.values()){
+    const a=nodes.get(e.src),b=nodes.get(e.dst);if(!a||!b)continue;
+    e.dispQ+=(e.targetQ-e.dispQ)*0.12;                  // ease Q toward target (smooth growth)
+    // faint prior underlay
+    ctx.setLineDash(lineStyle(e.etype));
+    ctx.strokeStyle=`rgba(139,148,158,${0.12+e.P*0.18})`; ctx.lineWidth=1*devicePixelRatio;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+    // learned Q on top
+    const k=edgeKey([e.src,e.dst,e.etype]);
+    const sel=highlight.selEdge===k, wrote=highlight.lastWrite===k;
+    ctx.strokeStyle=wrote?'#ffd33d':(sel?'#ffffff':`rgba(88,166,255,${0.25+e.dispQ*0.6})`);
+    ctx.lineWidth=(1+e.dispQ*4)*devicePixelRatio;
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // nodes
+  const now=performance.now();
+  for(const n of nodes.values()){
+    const grow=Math.min(1,(now-n.born)/500);           // spring-in on birth
+    const r=(9+ (highlight.frontier.has(n.id)?3:0))*devicePixelRatio*grow;
+    if(highlight.frontier.has(n.id)){ctx.beginPath();ctx.arc(n.x,n.y,r+6*devicePixelRatio,0,7);
+      ctx.fillStyle='rgba(255,211,61,0.15)';ctx.fill();}
+    if(highlight.execNode===n.id){ctx.beginPath();
+      ctx.arc(n.x,n.y,r+4*devicePixelRatio*(1+0.3*Math.sin(now/120)),0,7);
+      ctx.strokeStyle='#ffd33d';ctx.lineWidth=2*devicePixelRatio;ctx.stroke();}
+    ctx.beginPath();ctx.arc(n.x,n.y,r,0,7);
+    ctx.fillStyle=TYPE_COLORS[n.type]||'#999';ctx.fill();
+    ctx.fillStyle='#0d1117';ctx.font=`${9*devicePixelRatio}px monospace`;
+    if(n.lock||n.reversible===false){ctx.fillText('🔒',n.x-6*devicePixelRatio,n.y+4*devicePixelRatio);}
+    if(n.lessons.length){ctx.beginPath();
+      ctx.arc(n.x+r,n.y-r,3.5*devicePixelRatio,0,7);ctx.fillStyle='#3fb950';ctx.fill();}
+  }
+  // labels
+  ctx.fillStyle='#8b949e';ctx.font=`${10*devicePixelRatio}px monospace`;
+  for(const n of nodes.values()) ctx.fillText(n.id,n.x+12*devicePixelRatio,n.y+3*devicePixelRatio);
+}
+function frame(t){
+  if(playing){
+    if(allEvents.length && cursor<allEvents.length){
+      if(t-lastTick> (260/speed)){ stepFwd(); lastTick=t; }
+    }
+    drainLive();
+  }
+  physics(); draw(); requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- hover tooltip (experience record) -----------------------------------------------------
+const tip=document.getElementById('tip');
+canvas.addEventListener('mousemove',ev=>{
+  const mx=ev.offsetX*devicePixelRatio,my=ev.offsetY*devicePixelRatio;let hit=null;
+  for(const n of nodes.values()){if(Math.hypot(n.x-mx,n.y-my)<14*devicePixelRatio){hit=n;break;}}
+  if(hit){tip.style.display='block';tip.style.left=(ev.clientX+12)+'px';tip.style.top=(ev.clientY+12)+'px';
+    tip.innerHTML=`<b>${hit.id}</b> <span class=k>${hit.type}${hit.reversible===false?' 🔒':''}</span>`+
+      `<br><span class=k>lessons:</span> ${hit.lessons.length}`+
+      (hit.lessons.length?'<br>· '+hit.lessons.slice(-3).join('<br>· '):'');}
+  else tip.style.display='none';
+});
+
+// ---- controls ------------------------------------------------------------------------------
+document.getElementById('file').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;const text=await f.text();
+  const list=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(l=>{
+    try{return JSON.parse(l);}catch(_){return null;}}).filter(Boolean);
+  playing=false;loadEvents(list);
+});
+document.getElementById('play').addEventListener('click',e=>{playing=!playing;
+  e.target.textContent=playing?'⏸ Pause':'▶ Play';});
+document.getElementById('step').addEventListener('click',()=>{playing=false;stepFwd();});
+document.getElementById('back').addEventListener('click',()=>{playing=false;seekTo(cursor-1);});
+document.getElementById('scrub').addEventListener('input',e=>{playing=false;seekTo(Number(e.target.value));});
+document.getElementById('speed').addEventListener('change',e=>{speed=Number(e.target.value);});
+document.getElementById('live').addEventListener('click',()=>{
+  resetModel();allEvents=[];cursor=0;connectLive(document.getElementById('liveUrl').value);});
+</script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+{
+  "category": "web",
+  "archetypes": ["web_appsec"],
+  "summary": "Web exploitation: attack a running web app/service through its flaws to read the flag (a file, a DB row, an admin-only page). Workflow: map the surface -> identify inputs & tech -> test each input against the vuln classes -> chain the finding to the flag. Carry session state in files (cookie jars) since shell vars don't persist between sandbox commands.",
+  "quick_triage": [
+    "Fetch / with headers: curl -s -i http://TARGET:PORT/ . Note server, framework, cookies, Set-Cookie, redirects.",
+    "Read served HTML/JS, /robots.txt, /sitemap.xml, /.git/HEAD, comments. Pull endpoints and parameters.",
+    "Content discovery: ffuf -u http://TARGET:PORT/FUZZ -w /usr/share/wordlists/common.txt -mc 200,204,301,302,307,401,403 -t 40.",
+    "For each input (query/body/header/cookie/path) test the vuln classes in order of likelihood for the stack.",
+    "Flag is usually: a file via LFI/traversal/RCE, a DB value via SQLi, an admin page via auth bypass/IDOR, or SSRF to an internal service.",
+    "Keep cookies in a jar file: curl -c jar -b jar ... (sandbox filesystem persists; shell variables do not)."
+  ],
+  "tools": [
+    {"name": "curl", "when": "The workhorse — any request, custom headers, cookie jars, follow redirects.", "install": {"apk": "curl"}, "usage": "curl -s -i -c jar -b jar -H 'X-Forwarded-For: 127.0.0.1' 'http://T/p?id=1'", "docs": "https://curl.se/docs/"},
+    {"name": "python3 + requests/httpx", "when": "Scripted multi-step exploits, session handling, blind/timing oracles.", "install": {"pip": "requests httpx"}, "usage": "import requests; s=requests.Session(); s.get(url)", "docs": "https://requests.readthedocs.io/"},
+    {"name": "ffuf", "when": "Content & parameter discovery, vhost fuzzing, value brute force.", "install": {"go": "github.com/ffuf/ffuf/v2@latest"}, "usage": "ffuf -u http://T/FUZZ -w /usr/share/wordlists/common.txt -mc all -fc 404 -t 40", "docs": "https://github.com/ffuf/ffuf"},
+    {"name": "gobuster", "when": "Alternative dir/dns/vhost brute forcer.", "install": {"go": "github.com/OJ/gobuster/v3@latest"}, "usage": "gobuster dir -u http://T -w /usr/share/wordlists/common.txt", "docs": "https://github.com/OJ/gobuster"},
+    {"name": "feroxbuster", "when": "Recursive content discovery, fast, auto-follows found dirs.", "install": {"note": "cargo install feroxbuster or release binary"}, "usage": "feroxbuster -u http://T -w /usr/share/wordlists/raft-small-words.txt", "docs": "https://github.com/epi052/feroxbuster"},
+    {"name": "sqlmap", "when": "Confirm + exploit SQL injection, dump DB, read files, get shell.", "install": {"pip": "sqlmap"}, "usage": "sqlmap -u 'http://T/p?id=1' --batch --dump   (or -r request.txt)", "docs": "https://github.com/sqlmapproject/sqlmap/wiki"},
+    {"name": "nuclei", "when": "Fast templated scan for known CVEs/misconfigs/exposures.", "install": {"go": "github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"}, "usage": "nuclei -u http://T -tags cve,exposure", "docs": "https://docs.projectdiscovery.io/tools/nuclei"},
+    {"name": "nikto", "when": "Quick server misconfig / dangerous-file scan.", "install": {"apk": "nikto"}, "usage": "nikto -h http://T:PORT", "docs": "https://github.com/sullo/nikto"},
+    {"name": "whatweb", "when": "Fingerprint the tech stack (framework, CMS, versions).", "install": {"apk": "whatweb"}, "usage": "whatweb -a 3 http://T", "docs": "https://github.com/urbanadventurer/WhatWeb"},
+    {"name": "jwt_tool", "when": "Inspect/forge JWTs: alg:none, weak HMAC secret, key confusion, kid injection.", "install": {"git": "https://github.com/ticarpi/jwt_tool"}, "usage": "python3 jwt_tool.py <token> -X a   # alg:none ;  -C -d rockyou.txt to crack", "docs": "https://github.com/ticarpi/jwt_tool"},
+    {"name": "commix", "when": "Automate OS command injection discovery + exploitation.", "install": {"git": "https://github.com/commixproject/commix"}, "usage": "commix -u 'http://T/ping?host=127.0.0.1'", "docs": "https://github.com/commixproject/commix"},
+    {"name": "dalfox", "when": "XSS discovery + verification (DOM/reflected/stored).", "install": {"go": "github.com/hahwul/dalfox/v2@latest"}, "usage": "dalfox url 'http://T/search?q=FUZZ'", "docs": "https://github.com/hahwul/dalfox"},
+    {"name": "arjun", "when": "Discover hidden HTTP parameters an endpoint accepts.", "install": {"pip": "arjun"}, "usage": "arjun -u http://T/api", "docs": "https://github.com/s0md3v/Arjun"},
+    {"name": "git-dumper", "when": "Exposed /.git — reconstruct source (then grep for secrets/logic).", "install": {"pip": "git-dumper"}, "usage": "git-dumper http://T/.git out/ && git -C out log -p", "docs": "https://github.com/arthaud/git-dumper"},
+    {"name": "wfuzz", "when": "Flexible fuzzer when ffuf's matching isn't enough (multi-position, encodings).", "install": {"pip": "wfuzz"}, "usage": "wfuzz -z range,1-1000 'http://T/item?id=FUZZ'", "docs": "https://wfuzz.readthedocs.io/"},
+    {"name": "Burp Suite (Community)", "when": "Interactive proxy/repeater/intruder when a human-in-the-loop is available (not for headless runs).", "install": {"note": "desktop app; use curl/python for automated sandbox runs"}, "usage": "Proxy -> Repeater to iterate a request by hand", "docs": "https://portswigger.net/burp"},
+    {"name": "OWASP ZAP", "when": "Open-source intercepting proxy / active scanner — scriptable headless alternative to Burp.", "install": {"apt": "zaproxy", "note": "or owasp/zap2docker image"}, "usage": "zap.sh -cmd -quickurl http://T -quickout report.html", "docs": "https://www.zaproxy.org/"},
+    {"name": "hydra", "when": "Brute-force login forms / auth (HTTP, SSH, FTP, etc.) when credentials are the gate.", "install": {"apt": "hydra"}, "usage": "hydra -l admin -P rockyou.txt T http-post-form '/login:user=^USER^&pass=^PASS^:Invalid'", "docs": "https://github.com/vanhauser-thc/thc-hydra"},
+    {"name": "XSSer", "when": "Automated detection/exploitation of XSS (alternative to dalfox).", "install": {"apt": "xsser", "git": "https://github.com/epsylon/xsser"}, "usage": "xsser -u 'http://T/search?q=XSS'", "docs": "https://xsser.03c8.net/"}
+  ]
+}

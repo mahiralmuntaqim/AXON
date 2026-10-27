@@ -1,0 +1,37 @@
+{
+  "category": "forensics",
+  "archetypes": ["ctf_forensics"],
+  "summary": "Investigate files/data (images, pcaps, memory dumps, disk images, archives) to recover hidden info. Workflow: identify the artifact type -> apply the matching extraction (carving / stego / pcap / memory / disk) -> recover the flag. Start with the cheapest checks (file, strings, exiftool, binwalk).",
+  "quick_triage": [
+    "file artifact ; strings -n 6 artifact | grep -iE 'flag|ctf\\{' ; xxd artifact | head  (magic bytes & obvious text).",
+    "Route by type: image -> stego path; pcap -> wireshark/tshark; mem dump -> volatility3; disk image -> sleuthkit/autopsy; archive -> extract (crack if encrypted); office/pdf -> embedded-object tools.",
+    "ALWAYS run binwalk + exiftool on any file: appended/embedded data and metadata are the #1 hiding spots.",
+    "For images also run zsteg (PNG/BMP) or steghide (JPG/WAV) and check with stegsolve bit-planes.",
+    "If a magic-byte/header looks corrupted, repair it (correct the signature) and reopen.",
+    "Audio -> look at the spectrogram. QR/barcode -> zbarimg."
+  ],
+  "tools": [
+    {"name": "binwalk", "when": "ALWAYS. Find + extract embedded/appended files and filesystems inside any blob.", "install": {"apt": "binwalk"}, "usage": "binwalk -e artifact ; binwalk --dd='.*' artifact", "docs": "https://github.com/ReFirmLabs/binwalk"},
+    {"name": "exiftool", "when": "ALWAYS on media/docs. Read metadata (comments, GPS, author, hidden fields).", "install": {"apt": "libimage-exiftool-perl"}, "usage": "exiftool artifact", "docs": "https://exiftool.org/"},
+    {"name": "strings + xxd", "when": "First look for plaintext/encoded flags and to read magic bytes.", "install": {"apk": "binutils coreutils"}, "usage": "strings -n 6 -e l artifact | grep -i ctf ; xxd artifact | head", "docs": "https://man7.org/linux/man-pages/man1/strings.1.html"},
+    {"name": "foremost / scalpel / photorec", "when": "File carving — recover files by signature from a blob/disk image when binwalk misses.", "install": {"apt": "foremost scalpel testdisk"}, "usage": "foremost -i image.dd -o out/ ; photorec image.dd", "docs": "https://github.com/korczis/foremost"},
+    {"name": "zsteg", "when": "LSB/stego in PNG and BMP (the go-to for PNG stego).", "install": {"gem": "zsteg"}, "usage": "zsteg -a image.png", "docs": "https://github.com/zed-0xff/zsteg"},
+    {"name": "steghide", "when": "Hidden data in JPG/BMP/WAV/AU (often passphrase-protected).", "install": {"apt": "steghide"}, "usage": "steghide extract -sf image.jpg -p '' ; steghide info image.jpg", "docs": "https://steghide.sourceforge.net/"},
+    {"name": "stegseek", "when": "Brute-force a steghide passphrase fast with a wordlist.", "install": {"git": "https://github.com/RickdeJager/stegseek"}, "usage": "stegseek image.jpg rockyou.txt", "docs": "https://github.com/RickdeJager/stegseek"},
+    {"name": "stegsolve / stegolab", "when": "Visually step image bit-planes / color channels (GUI) to spot hidden pixels.", "install": {"note": "stegsolve.jar (Java); or use python PIL to split planes headlessly"}, "usage": "java -jar stegsolve.jar  (headless: PIL to extract LSB plane)", "docs": "http://www.caesum.com/handbook/stego.htm"},
+    {"name": "outguess", "when": "JPEG stego alternative to steghide.", "install": {"apt": "outguess"}, "usage": "outguess -r image.jpg out.txt", "docs": "https://github.com/resurrecting-open-source-projects/outguess"},
+    {"name": "pngcheck", "when": "Validate/repair PNG structure; find appended chunks or wrong dimensions hiding content.", "install": {"apt": "pngcheck"}, "usage": "pngcheck -vtp7 image.png", "docs": "http://www.libpng.org/pub/png/apps/pngcheck.html"},
+    {"name": "wireshark / tshark", "when": "PCAP analysis: follow streams, extract files/credentials/flags from traffic.", "install": {"apt": "tshark wireshark"}, "usage": "tshark -r cap.pcap -q -z follow,tcp,ascii,0 ; tshark -r cap.pcap --export-objects http,out/", "docs": "https://www.wireshark.org/docs/"},
+    {"name": "volatility3", "when": "Memory-dump forensics: processes, cmdlines, files, hashes, injected code.", "install": {"pip": "volatility3"}, "usage": "vol -f mem.raw windows.pslist ; vol -f mem.raw windows.cmdline ; vol -f mem.raw windows.filescan", "docs": "https://volatility3.readthedocs.io/"},
+    {"name": "The Sleuth Kit (fls/icat/mmls)", "when": "Disk-image forensics: list files (incl. deleted), extract by inode, read partition table.", "install": {"apt": "sleuthkit"}, "usage": "mmls disk.dd ; fls -r -o <offset> disk.dd ; icat -o <offset> disk.dd <inode> > file", "docs": "https://www.sleuthkit.org/sleuthkit/docs.php"},
+    {"name": "bulk_extractor", "when": "Sweep a disk/mem image for emails, URLs, PII, and flag-looking strings fast.", "install": {"apt": "bulk-extractor"}, "usage": "bulk_extractor -o out/ image.dd", "docs": "https://github.com/simsong/bulk_extractor"},
+    {"name": "john (zip2john/pdf2john/rar2john)", "when": "Crack encrypted archives/PDFs/office files.", "install": {"apt": "john"}, "usage": "zip2john secret.zip > h ; john --wordlist=rockyou.txt h", "docs": "https://www.openwall.com/john/"},
+    {"name": "zbarimg", "when": "Decode QR codes / barcodes in images.", "install": {"apt": "zbar-tools"}, "usage": "zbarimg image.png", "docs": "https://github.com/mchehab/zbar"},
+    {"name": "sox / Audacity / Sonic Visualiser", "when": "Audio stego: spectrogram (text drawn in frequencies), DTMF, slowed/reversed.", "install": {"apt": "sox"}, "usage": "sox audio.wav -n spectrogram -o spec.png", "docs": "http://sox.sourceforge.net/"},
+    {"name": "oletools / pdf-parser", "when": "Office macros and PDF objects/streams (malicious or hidden content).", "install": {"pip": "oletools"}, "usage": "olevba doc.docm ; pdf-parser.py file.pdf", "docs": "https://github.com/decalage2/oletools"},
+    {"name": "NetworkMiner", "when": "PCAP network-forensics GUI: auto-extract transferred files, images, credentials, sessions.", "install": {"note": "netresec.com (.NET; runs on Linux via mono)"}, "usage": "open pcap -> Files / Credentials tabs", "docs": "https://www.netresec.com/?page=NetworkMiner"},
+    {"name": "aircrack-ng", "when": "Crack WEP/WPA-PSK from a captured 802.11 handshake in a pcap.", "install": {"apt": "aircrack-ng"}, "usage": "aircrack-ng -w rockyou.txt capture.cap", "docs": "https://www.aircrack-ng.org/"},
+    {"name": "ImageMagick", "when": "Convert/inspect/transform images (format changes, channel/plane extraction, deblur steps).", "install": {"apt": "imagemagick"}, "usage": "convert img.png -separate ch_%d.png ; identify -verbose img.png", "docs": "https://imagemagick.org/"},
+    {"name": "StegCracker", "when": "Brute-force steghide-embedded data with a wordlist (needs steghide installed).", "install": {"pip": "stegcracker"}, "usage": "stegcracker img.jpg rockyou.txt", "docs": "https://github.com/Paradoxis/StegCracker"}
+  ]
+}
