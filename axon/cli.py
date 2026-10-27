@@ -97,6 +97,30 @@ def cmd_experiment_b(args: argparse.Namespace) -> None:
         print(f"episodes_seen={i} solve_mean={band.mean:.2f} +/- {band.std:.2f} (n={band.n})")
 
 
+def cmd_benchmarks(args: argparse.Namespace) -> None:
+    from .benchmark.registry import BENCHMARKS, get_harness
+
+    names = [args.name] if args.name else list(BENCHMARKS)
+    for name in names:
+        h = get_harness(name)
+        try:
+            tasks = h.load_tasks()
+        except FileNotFoundError as exc:
+            print(f"{name}: index missing — {exc}")
+            continue
+        root = h.data_root()
+        cats = {}
+        for t in tasks:
+            cats[t.category] = cats.get(t.category, 0) + 1
+        cat_str = ", ".join(f"{k}:{v}" for k, v in sorted(cats.items()))
+        print(f"{name:13s} {len(tasks):4d} tasks | {h.contamination:10s} | "
+              f"data: {'present' if root else 'not found (path-referenced)'}")
+        print(f"              categories: {cat_str}")
+        if args.list:
+            for t in tasks[: args.limit]:
+                print(f"                - {t.task_id}  [{t.category}]")
+
+
 def cmd_viz(args: argparse.Namespace) -> None:
     index = Path(__file__).resolve().parent.parent / "viz" / "index.html"
     print(f"Open the visualizer: {index}")
@@ -126,6 +150,12 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("experiment-b", help="continual-learning curve")
     b.add_argument("--orderings", type=int, default=5)
     b.set_defaults(func=cmd_experiment_b)
+
+    bm = sub.add_parser("benchmarks", help="list loaded benchmark tasks (nyuctf/autopenbench/cybench/xbow)")
+    bm.add_argument("--name", default=None, help="a single benchmark; default lists all")
+    bm.add_argument("--list", action="store_true", help="also print individual task ids")
+    bm.add_argument("--limit", type=int, default=20)
+    bm.set_defaults(func=cmd_benchmarks)
 
     v = sub.add_parser("viz", help="how to view the visualizer")
     v.add_argument("--events", default="events.jsonl")

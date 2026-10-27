@@ -12,3 +12,11 @@ scratch_*
 seed_graph.json
 final_graph.json
 snapshots/
+
+# benchmark data repos are referenced by path, NEVER committed (multi-GB).
+# The small metadata-only indices under axon/benchmark/indices/ ARE tracked.
+/NYU_CTF_Bench/
+/auto-pen-bench/
+/cybench/
+/xbow/
+/benchmark/

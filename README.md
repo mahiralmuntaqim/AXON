@@ -200,7 +200,7 @@ python -m venv .venv
 .venv/Scripts/activate            # Windows;  source .venv/bin/activate on POSIX
 pip install -r requirements.txt
 
-pytest axon/tests                 # 72 tests, fully offline (LLM + target are mocked)
+pytest axon/tests                 # 83 tests, fully offline (LLM + target are mocked)
 ```
 
 Run everything offline (mock model + mock target):
@@ -249,8 +249,112 @@ completion (partial credit for long-horizon progress), and **dollars per solved 
 Baselines behind the same interface: frozen ReAct, HackSynth (rolling-summary memory), and a
 vector-experience agent.
 
-Benchmark adapters (`Vulhub`, `AutoPenBench`, `XBOW/XBEN`, `Cybench`, `NYU CTF`) sit behind one
-common interface. **They are labeled stubs** — see below.
+### Benchmarks
+
+Four external benchmarks are wired in under [`axon/benchmark/`](axon/benchmark/), behind the
+common harness interface:
+
+| Benchmark | Tasks | Role | Contamination |
+|---|---:|---|---|
+| **NYU CTF Bench** | 257 | SOTA comparison (CRAKEN, D-CIPHER) | HIGH |
+| **AutoPenBench** | 33 | milestone / partial-credit; vs. Pentest-R1 | moderate |
+| **Cybench** | 43 | SOTA comparison, subtask scoring | HIGH |
+| **XBOW / XBEN** | 104 | low-contamination (injected random flags) — cleanest signal | LOW |
+
+#### How the benchmarks are stored
+
+The benchmark repos are multi-gigabyte (Docker challenge environments, binaries, datasets —
+~5.4 GB in total), so they are **not committed to this repo**. Instead AXON keeps only a small,
+committed **task index per benchmark** in [`axon/benchmark/indices/`](axon/benchmark/indices/):
+
+- Indices are **metadata only** — task ids, categories, difficulty, tags. They contain **no
+  flags and no solution prompts**, so no benchmark solution is ever committed (contamination
+  hygiene, per the decontamination section). Total size ≈ 100 KB.
+- The heavy challenge data stays wherever you cloned/built it and is located at **runtime** by
+  [`axon/benchmark/paths.py`](axon/benchmark/paths.py).
+
+```
+axon/benchmark/
+  indices/          committed, metadata-only task lists (nyuctf/autopenbench/cybench/xbow .json)
+  paths.py          locates the heavy data repos at runtime (env var or default path)
+  build_indices.py  regenerates the indices from the source repos
+  base_loader.py    shared adapter: load_tasks() from an index -> harness Tasks
+  nyuctf.py  autopenbench.py  cybench.py  xbow.py   per-benchmark adapters
+  registry.py       name -> adapter
+```
+
+#### 1. Point AXON at the benchmark data
+
+Resolution order, per benchmark (first hit wins); if none exists the data is simply "not found"
+and only `start()` is affected — `load_tasks()` still works from the committed index:
+
+1. `AXON_BENCH_<NAME>` — full path to one benchmark repo, e.g. `AXON_BENCH_XBOW=/data/xbow`
+2. `AXON_BENCH_ROOT` — a parent folder that contains all of them (`NYU_CTF_Bench/`,
+   `auto-pen-bench/`, `cybench/`, `xbow/`)
+3. the built-in default root in `paths.py`
+
+```bash
+# POSIX
+export AXON_BENCH_ROOT=/path/to/benchmarks
+# Windows (PowerShell)
+$env:AXON_BENCH_ROOT = "C:\path\to\benchmarks"
+```
+
+Folder names expected under the root: `NYU_CTF_Bench`, `auto-pen-bench`, `cybench`, `xbow`.
+
+#### 2. (Re)build the task indices
+
+The indices are already committed. Regenerate them whenever the source benchmarks change (needs
+the data present); benchmarks whose data isn't found are skipped, not errored:
+
+```bash
+python -m axon.benchmark.build_indices
+```
+
+#### 3. Inspect from the CLI
+
+```bash
+python -m axon.cli benchmarks                      # counts + categories for all four
+python -m axon.cli benchmarks --name xbow --list   # list individual task ids
+```
+
+```
+nyuctf         257 tasks | HIGH risk  | data: present
+              categories: crypto:63, forensics:25, misc:30, pwn:49, rev:61, web:29
+xbow           104 tasks | LOW        | data: present
+              categories: web:104
+```
+
+#### 4. Use from Python
+
+```python
+from axon.benchmark import get_harness
+
+h = get_harness("xbow")          # or "nyuctf" | "autopenbench" | "cybench"
+tasks = h.load_tasks()           # real Task list from the committed index (works offline)
+print(len(tasks), tasks[0].task_id, tasks[0].category, tasks[0].metadata)
+
+h.data_root()                    # Path to the full challenge data, or None if not located
+# h.start(task)                  # STUB: needs the full data + a container runtime (see below)
+```
+
+Each task's `root_node_id` points at the matching knowledge-pack triage node
+(`web::triage`, `crypto::triage`, …) when its category maps to a pack, so retrieval seeds from
+the right place; network-pentest tasks (AutoPenBench) start from the generic `root` RECON node.
+
+#### 5. Running a task (execution status)
+
+`load_tasks()` is **real**. `start()` — spinning up the challenge container and driving the
+engagement loop against it — needs the full data plus a container runtime and is a
+**clearly-labeled stub** (`BenchmarkDataUnavailable`) in this build; wiring it is per-deployment
+work. `Vulhub` remains a pure stub (no data was provided for it).
+
+#### Adding another benchmark
+
+1. add its folder name to `FOLDER` in `paths.py`;
+2. add a `build_<name>()` extractor (metadata only — no flags) in `build_indices.py`;
+3. subclass `BenchmarkHarnessBase` with a `_to_task(entry)` mapping;
+4. register it in `registry.py`.
 
 ## Project layout
 
@@ -264,9 +368,10 @@ axon/
   execution/    sandbox allowlist · tool runner · result types
   harness/      common benchmark interface · mock harness · benchmark stubs
   engagement/   the loop (Algorithm 1) · state/budget · events · replay · runner
+  benchmark/    NYU CTF / AutoPenBench / Cybench / XBOW adapters + committed task indices
   eval/         metrics · experiment_a · experiment_b · baselines
-  cli.py        construct / run / experiment-a / experiment-b / viz
-  tests/        72 offline tests
+  cli.py        construct / run / experiment-a / experiment-b / benchmarks / viz
+  tests/        83 offline tests
 knowledge_packs/  six CTF/pentest packs (111 tools) — the graph's source content
 viz/              self-contained read-only visualizer (replay + live)
 ARCHITECTURE.md · STATUS.md
@@ -274,7 +379,7 @@ ARCHITECTURE.md · STATUS.md
 
 ## What is real vs. stubbed
 
-Everything above runs end to end **offline** — 72 tests pass, and the CLI solves the mock task,
+Everything above runs end to end **offline** — 83 tests pass, and the CLI solves the mock task,
 builds the real graph, and runs both experiments. The following are intentional, clearly-labeled
 stubs (see [STATUS.md](STATUS.md) for the full list); per the project's own rules, **no real
 benchmark is claimed to work until it has run a task end to end:**

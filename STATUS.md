@@ -1,6 +1,6 @@
 # AXON — Status & final check (SEGMENT 18)
 
-Last run: full suite **72 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
+Last run: full suite **83 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
 all execute end to end on the mock harness.
 
 **Knowledge content (SEGMENT 2/3):** `knowledge_packs/` (6 CTF categories, 111 curated tools)
@@ -47,8 +47,9 @@ benchmark is claimed to work** — only the mock harness has run a task end to e
 - `execution/tools.py::SubprocessBackend` — real execution of allowlisted tools in a sandboxed
   container. Must only run after `Sandbox.validate`; invokes known tools only, no payload
   generation.
-- `harness/stubs.py` — Vulhub, AutoPenBench, XBOW/XBEN, Cybench, NYU CTF adapters. **None have
-  run a real task.**
+- Benchmark **execution**: `axon/benchmark/*.start()` and `harness/stubs.py::vulhub` — running a
+  real task needs the full challenge data plus a container runtime. Task *loading* is real (see
+  below); execution is the remaining stub, so **no benchmark has run a task end to end** yet.
 - `eval/baselines.py::PentestR1Baseline` and a CRAKEN static-RAG wiring helper.
 - `memory/read.py::fold_result` — head/tail folder; a real deployment can route folding
   through the LLM (contract unchanged: raw logs never reach working context).

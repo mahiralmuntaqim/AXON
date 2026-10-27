@@ -71,10 +71,14 @@ def nyuctf() -> _StubHarness:
     )
 
 
+# vulhub stays a pure stub (no data provided). The other four now have REAL adapters in
+# axon.benchmark that load actual task lists from committed indices — use those.
+from ..benchmark.registry import BENCHMARKS as _REAL_BENCHMARKS  # noqa: E402
+
 ALL_BENCHMARKS = {
-    "vulhub": vulhub,
-    "autopenbench": autopenbench,
-    "xbow": xbow,
-    "cybench": cybench,
-    "nyuctf": nyuctf,
+    "vulhub": vulhub,          # stub only
+    "autopenbench": _REAL_BENCHMARKS["autopenbench"],
+    "xbow": _REAL_BENCHMARKS["xbow"],
+    "cybench": _REAL_BENCHMARKS["cybench"],
+    "nyuctf": _REAL_BENCHMARKS["nyuctf"],
 }
