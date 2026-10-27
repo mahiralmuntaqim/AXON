@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
-from ..harness.base import Task
+from ..harness.base import Task, TaskEnvironment
+from ..llm.client import LLMClient
 from .base_loader import BenchmarkHarnessBase
 
 
@@ -19,6 +20,34 @@ class XbowHarness(BenchmarkHarnessBase):
     role = "low-contamination (injected random flags) — cleanest signal"
     contamination = "LOW"
     supports_dry_run = False
+
+    def __init__(self) -> None:
+        self._cfg: Optional[dict] = None
+        self._llm: Optional[LLMClient] = None
+        self._cleanup: Optional[Callable[[], None]] = None
+
+    def prepare(self, cfg: dict, llm: Optional[LLMClient] = None) -> None:
+        """Supply the config + LLM used to build a live environment in ``start()``."""
+        self._cfg = cfg
+        self._llm = llm
+
+    def start(self, task: Task) -> TaskEnvironment:
+        """Bring up the challenge container and build a live TaskEnvironment (needs data+Docker)."""
+        root = self.data_root()
+        if root is None:
+            return super().start(task)  # raises the labeled "data not found" error
+        if self._cfg is None:
+            raise RuntimeError("call prepare(cfg, llm) before start() for a live run")
+        from .bridge import make_xbow_env
+
+        env, teardown = make_xbow_env(task, data_root=root, cfg=self._cfg, llm=self._llm)
+        self._cleanup = teardown
+        return env
+
+    def teardown(self, env: TaskEnvironment) -> None:
+        if self._cleanup is not None:
+            self._cleanup()
+            self._cleanup = None
 
     def _to_task(self, entry: dict) -> Task:
         return Task(

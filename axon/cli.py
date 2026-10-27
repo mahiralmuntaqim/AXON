@@ -121,6 +121,60 @@ def cmd_benchmarks(args: argparse.Namespace) -> None:
                 print(f"                - {t.task_id}  [{t.category}]")
 
 
+def cmd_benchmark_run(args: argparse.Namespace) -> None:
+    """Run the engagement loop against a LIVE benchmark challenge (needs data + Docker)."""
+    from .benchmark.registry import get_harness
+    from .knowledge.packs import build_procedural_graph
+    from .llm.client import LLMClient
+
+    cfg = load_config(args.config)
+    cfg.setdefault("llm", {})
+    cfg["llm"]["provider"] = args.provider
+    cfg["llm"]["model"] = args.model
+    cfg.setdefault("engagement", {})["step_budget"] = args.steps
+    # A benchmark container is disposable (compose down -v fully resets it), so actions are
+    # effectively reversible — relax the irreversibility floor for the run.
+    cfg.setdefault("safety", {})["q_min"] = args.q_min
+
+    emb = _embedder(cfg)
+    # Persistent G_K: load the accumulating snapshot if it exists, else seed from the packs.
+    # Saved back after the run so learning carries across engagements (the whole point).
+    from pathlib import Path as _Path
+
+    from .graph.persistence import load_procedural, save_procedural
+
+    if args.graph and _Path(args.graph).is_file():
+        graph = load_procedural(args.graph)
+        print(f"loaded persistent G_K from {args.graph} ({len(graph)} nodes)")
+    else:
+        graph = build_procedural_graph(embedder=emb).graph
+        print(f"seeded G_K from knowledge packs ({len(graph)} nodes)")
+    llm = LLMClient.from_config(cfg["llm"])
+
+    h = get_harness(args.name)
+    if not hasattr(h, "prepare"):
+        raise SystemExit(f"{args.name} has no live runner yet (only xbow is wired)")
+    h.prepare(cfg, llm)
+    task = next((t for t in h.load_tasks() if t.task_id == args.task), None)
+    if task is None:
+        raise SystemExit(f"task {args.task!r} not found in {args.name}")
+
+    print(f"starting {args.name}/{task.task_id} with {args.provider}:{args.model} ...")
+    env = h.start(task)
+    try:
+        outcome = run_engagement(cfg, graph, env, emb, llm=llm,
+                                 emitter=EventEmitter(log_path=args.events))
+    finally:
+        h.teardown(env)
+    if args.graph:
+        save_procedural(graph, args.graph)  # persist accumulated learning
+    print(json.dumps(
+        {"task": task.task_id, "solved": outcome.solved, "steps": outcome.steps,
+         "cost_units": round(outcome.cost, 4), "events": args.events,
+         "graph": args.graph, "nodes": len(graph)}, indent=2
+    ))
+
+
 def cmd_viz(args: argparse.Namespace) -> None:
     index = Path(__file__).resolve().parent.parent / "viz" / "index.html"
     print(f"Open the visualizer: {index}")
@@ -156,6 +210,18 @@ def build_parser() -> argparse.ArgumentParser:
     bm.add_argument("--list", action="store_true", help="also print individual task ids")
     bm.add_argument("--limit", type=int, default=20)
     bm.set_defaults(func=cmd_benchmarks)
+
+    br = sub.add_parser("benchmark-run", help="run the loop against a LIVE challenge (needs Docker)")
+    br.add_argument("--name", default="xbow")
+    br.add_argument("--task", required=True, help="challenge id, e.g. XBEN-001-24")
+    br.add_argument("--provider", default="nvidia")
+    br.add_argument("--model", default="nvidia/llama-3.1-nemotron-70b-instruct")
+    br.add_argument("--steps", type=int, default=12)
+    br.add_argument("--q-min", dest="q_min", type=float, default=0.0)
+    br.add_argument("--graph", default="axon_kg.json",
+                    help="persistent G_K snapshot: loaded if present, saved after (learning accumulates)")
+    br.add_argument("--events", default="bench_events.jsonl")
+    br.set_defaults(func=cmd_benchmark_run)
 
     v = sub.add_parser("viz", help="how to view the visualizer")
     v.add_argument("--events", default="events.jsonl")

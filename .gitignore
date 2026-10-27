@@ -20,3 +20,10 @@ snapshots/
 /cybench/
 /xbow/
 /benchmark/
+
+# benchmark run artifacts
+axon_kg.json
+bench_events.jsonl
+/tmp/
+
+jar

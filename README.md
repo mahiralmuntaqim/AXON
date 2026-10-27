@@ -200,7 +200,7 @@ python -m venv .venv
 .venv/Scripts/activate            # Windows;  source .venv/bin/activate on POSIX
 pip install -r requirements.txt
 
-pytest axon/tests                 # 96 tests, fully offline (LLM + target are mocked)
+pytest axon/tests                 # 100 tests, fully offline (LLM + target are mocked)
 ```
 
 Run everything offline (mock model + mock target):
@@ -444,7 +444,7 @@ axon/
   benchmark/    NYU CTF / AutoPenBench / Cybench / XBOW adapters + committed task indices
   eval/         metrics · experiment_a · experiment_b · baselines
   cli.py        construct / run / experiment-a / experiment-b / benchmarks / viz
-  tests/        96 offline tests
+  tests/        100 offline tests
 knowledge_packs/  six CTF/pentest packs (111 tools) — the graph's source content
 viz/              self-contained read-only visualizer (replay + live)
 ARCHITECTURE.md · STATUS.md
@@ -452,7 +452,7 @@ ARCHITECTURE.md · STATUS.md
 
 ## What is real vs. stubbed
 
-Everything above runs end to end **offline** — 96 tests pass, and the CLI solves the mock task,
+Everything above runs end to end **offline** — 100 tests pass, and the CLI solves the mock task,
 builds the real graph, and runs both experiments. The following are intentional, clearly-labeled
 stubs (see [STATUS.md](STATUS.md) for the full list); per the project's own rules, **no real
 benchmark is claimed to work until it has run a task end to end:**

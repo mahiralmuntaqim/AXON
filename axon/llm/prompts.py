@@ -92,3 +92,24 @@ def verify_outcome(goal: str, claimed: str, trace_summary: str) -> str:
         f"GOAL: {goal}\nCLAIMED: {claimed}\nTRACE (trimmed): {trace_summary[:800]}\n\n"
         f'{_JSON_REMINDER} Output {{"supported": true | false, "evidence": "<short>"}}.\n'
     )
+
+
+def action_synthesis(
+    technique_spec: str, tool: str, target: str, usage: str, findings: str
+) -> str:
+    """SEGMENT 10: turn a chosen technique + target into one concrete tool command.
+
+    The agent composes a documented tool invocation — it does not write novel exploit code.
+    The command must target only the given sandbox ``target`` and use the named ``tool``.
+    """
+    return (
+        "Compose ONE shell command that applies the technique below to the target, using the "
+        "named tool. Use only the given target host/URL. Do not write a new exploit program; "
+        "invoke the documented tool.\n\n"
+        f"TECHNIQUE: {technique_spec}\n"
+        f"TOOL: {tool}\n"
+        f"TOOL USAGE HINT: {usage}\n"
+        f"TARGET: {target}\n"
+        f"FINDINGS SO FAR: {findings}\n\n"
+        f'{_JSON_REMINDER} Output {{"command": "<one shell command>"}}.\n'
+    )

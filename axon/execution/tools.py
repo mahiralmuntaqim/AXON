@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Protocol
 
-from .result import ActionResult
+from .result import ActionResult, StateTransition, TransitionKind
 from .sandbox import Sandbox, SandboxViolation
 
 
@@ -57,17 +57,71 @@ class MockTarget(Target):
 
 
 class SubprocessBackend(Target):
-    """STUB: run allowed documented tools against a sandboxed container via subprocess.
+    """Run an allowlisted tool as a local subprocess and return its trace.
 
-    Not implemented here. When implemented, it must (a) only ever be reached after
-    ``Sandbox.validate`` passes, (b) invoke known tools only — never synthesize exploit
-    payloads, and (c) enforce the timeout at the process level.
+    Reached only AFTER ``Sandbox.validate`` has passed in :class:`ToolRunner` (host + tool on
+    the allowlist). It invokes known tools only — it never synthesizes exploit payloads; the
+    command string is whatever the planner/LLM composed from documented tool usage.
+
+    Outcome signals are read from the real output: if ``flag`` is supplied and appears in the
+    output, that is a verified ``MILESTONE_FLAG`` success (this is how a benchmark win is
+    detected). Extra regexes can mark other transitions. Everything else is left for the
+    verification gate to classify (tool error vs. genuine failure).
     """
 
-    def observe(self, action: Action) -> ActionResult:  # pragma: no cover - stub
-        raise NotImplementedError(
-            "STUB: SubprocessBackend is intentionally unimplemented. Wire it to invoke "
-            "allowlisted tools inside an authorized container. No exploit generation."
+    def __init__(
+        self,
+        *,
+        workdir: Optional[str] = None,
+        flag: Optional[str] = None,
+        timeout_s: float = 120.0,
+        env: Optional[dict] = None,
+        bash: bool = False,
+    ) -> None:
+        self.workdir = workdir
+        self.flag = flag
+        self.timeout_s = timeout_s
+        self.env = env
+        # Run commands through `bash -lc` (POSIX) rather than the native shell. Useful on
+        # Windows so LLM-composed POSIX commands (pipes, quoting) behave as intended.
+        self.bash = bash
+
+    def observe(self, action: Action) -> ActionResult:
+        import os
+        import subprocess
+
+        run_env = {**os.environ, **(self.env or {})}
+        cmd: object = ["bash", "-lc", action.command] if self.bash else action.command
+        try:
+            proc = subprocess.run(
+                cmd, shell=not self.bash, cwd=self.workdir, env=run_env,
+                capture_output=True, text=True, timeout=self.timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Let ToolRunner turn this into a timed-out ActionResult (a tool error).
+            raise TimeoutError(str(exc)) from exc
+
+        stdout, stderr = proc.stdout or "", proc.stderr or ""
+        transitions: list[StateTransition] = []
+        milestone: Optional[str] = None
+        claimed = False
+        blob = stdout + "\n" + stderr
+        if self.flag and self.flag in blob:
+            transitions.append(StateTransition(TransitionKind.MILESTONE_FLAG, self.flag))
+            milestone = self.flag
+            claimed = True
+
+        return ActionResult(
+            technique_id=action.technique_id,
+            command=action.command,
+            exit_code=proc.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            claimed_success=claimed,
+            claimed_outcome=("flag recovered" if claimed else ""),
+            state_transitions=transitions,
+            milestone=milestone,
+            cost=action.cost,
         )
 
 

@@ -1,6 +1,6 @@
 # AXON — Status & final check (SEGMENT 18)
 
-Last run: full suite **96 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
+Last run: full suite **100 passed**, offline. CLI `construct`/`run`/`experiment-a`/`experiment-b`
 all execute end to end on the mock harness.
 
 **Knowledge content (SEGMENT 2/3):** `knowledge_packs/` (6 CTF categories, 111 curated tools)
@@ -68,3 +68,16 @@ contamination-minimized measure, and results code/report should say so.
 `graph/schema.py::GraphBackend` + `knowledge/construct.py::GraphConstructor` let a user-supplied
 graph slot in without a rewrite. Construction is "an interface you fill"; `demo_seed_graph`
 is the built-in example used by the mock harness and tests.
+
+## Live execution bridge (update)
+
+The XBOW execution bridge is now implemented — `execution/tools.py::SubprocessBackend` (real,
+sandbox-gated tool runner), `benchmark/bridge.py` (docker-compose up/down, port discovery,
+LLM command synthesis, flag check), and `XbowHarness.start()/teardown()`. It has run **end to
+end against a live XBEN-001-24 container** driven by a real NVIDIA model via
+`python -m axon.cli benchmark-run`. First run did **not solve** in 10 steps, but the whole
+pipeline executed: retrieval → PUCT selection → LLM command synthesis → sandboxed execution →
+verification gate (1 Beta write, Q 0.5→0.33 + lesson) → flag check. G_K now persists across runs
+via `--graph`. Remaining to actually solve: a dockerized attacker toolbox (the host lacks
+ffuf/gobuster/etc.), a real semantic embedder (to stop cross-category drift), and more steps.
+Cybench / NYU / AutoPenBench `start()` and Vulhub remain stubs.

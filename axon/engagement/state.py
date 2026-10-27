@@ -47,6 +47,9 @@ class EngagementState:
     # Open frontier nodes (episodic/procedural ids) to jump to when backtracking.
     open_frontier: list[str] = field(default_factory=list)
     trajectory: list[dict] = field(default_factory=list)  # one record per executed step
+    # Edges that cannot work in THIS environment (sandbox-blocked or tool-error): excluded
+    # from selection so the agent never loops on a dead action. Keyed by edge.key tuples.
+    exhausted_edges: set = field(default_factory=set)
 
     def mark_goal(self) -> None:
         self.goal_reached = True

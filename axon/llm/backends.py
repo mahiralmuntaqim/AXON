@@ -208,6 +208,18 @@ def build_backend(llm_cfg: dict) -> LLMBackend:
     if provider in BACKEND_REGISTRY:
         return BACKEND_REGISTRY[provider](llm_cfg)
 
+    if provider == "nvidia":
+        # NVIDIA NIM (build.nvidia.com / integrate.api.nvidia.com) is OpenAI-compatible.
+        return OpenAICompatBackend(
+            model=model if model != "mock" else "nvidia/llama-3.1-nemotron-70b-instruct",
+            base_url=llm_cfg.get("base_url", "https://integrate.api.nvidia.com/v1"),
+            api_key_env=llm_cfg.get("api_key_env", "NVIDIA_API_KEY"),
+            endpoint_path=llm_cfg.get("endpoint_path", "/chat/completions"),
+            max_tokens=int(llm_cfg.get("max_tokens", 1024)),
+            extra_headers=llm_cfg.get("extra_headers"),
+            system=llm_cfg.get("system"),
+        )
+
     if provider == "openrouter":
         # OpenRouter is OpenAI-compatible; preset its base_url + key env (matches the
         # existing agent-pentest OpenRouterClient setup: OPENROUTER_API_KEY).

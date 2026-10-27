@@ -24,7 +24,7 @@ from ..graph.schema import EdgeType, ProceduralEdge, Reversibility, TechniqueNod
 from ..llm.client import LLMClient, LLMError
 from ..llm.prompts import prune_candidates
 from ..memory.read import MemoryReader, fold_result, state_summary
-from ..memory.verify import VerificationGate
+from ..memory.verify import Attribution, VerificationGate
 from ..memory.write import WritebackEngine
 from ..planning.reversibility import is_irreversible
 from ..planning.search import Planner, back_up
@@ -87,7 +87,8 @@ class EngagementLoop:
     # -- helpers ------------------------------------------------------------------------------
     def _candidate_edges(self, state: EngagementState, frontier_ids: set[str]) -> list[ProceduralEdge]:
         """Out-edges of the current node whose destination is in the retrieved frontier."""
-        out = self.graph.out_edges(state.current_node_id)
+        out = [e for e in self.graph.out_edges(state.current_node_id)
+               if e.key not in state.exhausted_edges]
         if not out:
             return []
         relevant = [e for e in out if e.dst in frontier_ids] if frontier_ids else out
@@ -118,9 +119,16 @@ class EngagementLoop:
     def _backtrack(self, state: EngagementState, step: int) -> bool:
         """Jump to the best open frontier node. Returns False if there is nowhere to go."""
         choices = [n for n in state.open_frontier if n != state.current_node_id]
-        if not choices:
+        # Prefer a node that still has at least one live (non-exhausted) out-edge.
+        live = [
+            n for n in choices
+            if any(e.key not in state.exhausted_edges for e in self.graph.out_edges(n))
+        ]
+        # Only move to a node that still has a live (non-exhausted) out-edge. If none exists,
+        # there is nowhere useful to go — return False so the loop ends instead of spinning.
+        if not live:
             return False
-        target = choices[0]
+        target = live[0]
         state.current_node_id = target
         self.emitter.emit(EventType.BACKTRACK, step, to_node=target)
         return True
@@ -196,7 +204,9 @@ class EngagementLoop:
             try:
                 result = self.runner.run(action)
             except SandboxViolation as exc:
-                # Blocked by the allowlist: nothing ran. Note it, charge a step, move on.
+                # Blocked by the allowlist: nothing ran. This edge can't work in this
+                # environment — exhaust it so it is never re-selected (no dead-action loop).
+                state.exhausted_edges.add(edge.key)
                 self.emitter.emit(EventType.VERIFY, step, blocked=str(exc), verified=False)
                 state.budget.charge(action.cost)
                 self.emitter.emit(EventType.BUDGET, step, steps_used=state.budget.steps_used,
@@ -207,6 +217,10 @@ class EngagementLoop:
 
             # f) VERIFY
             verification = self.gate.check(result)
+            # A tool/syntax error means this tool can't run here — exhaust the edge so the
+            # agent doesn't keep re-selecting an action the environment can't execute.
+            if verification.attribution is Attribution.TOOL_ERROR:
+                state.exhausted_edges.add(edge.key)
             _ = fold_result(result.raw_trace, max_chars=self.fold_max_chars)  # keep context small
             self.emitter.emit(
                 EventType.VERIFY, step, verified=verification.verified,

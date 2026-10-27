@@ -74,12 +74,17 @@ execution:
   allowed_tools:              # known, documented tools only — no novel payload generation
     - nmap
     - curl
+    - wget
     - gobuster
+    - ffuf
     - nikto
     - hydra
     - sqlmap
     - metasploit
     - searchsploit
+    - python3
+    - python
+    - jq
 
 eval:
   seeds: [0, 1, 2]            # report variance across seeds
