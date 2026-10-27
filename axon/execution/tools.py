@@ -46,6 +46,37 @@ class Target(Protocol):
     def observe(self, action: Action) -> ActionResult: ...
 
 
+def result_from_output(
+    action: Action, *, exit_code: int, stdout: str, stderr: str, flag: Optional[str]
+) -> ActionResult:
+    """Build an ActionResult from real tool output, flagging a MILESTONE_FLAG win.
+
+    Shared by every real backend (host subprocess, dockerized toolbox) so a benchmark win is
+    detected identically: if ``flag`` is supplied and appears anywhere in stdout/stderr, that is
+    a verified flag recovery. Everything else is left for the verification gate to classify.
+    """
+    stdout, stderr = stdout or "", stderr or ""
+    transitions: list[StateTransition] = []
+    milestone: Optional[str] = None
+    claimed = False
+    if flag and flag in (stdout + "\n" + stderr):
+        transitions.append(StateTransition(TransitionKind.MILESTONE_FLAG, flag))
+        milestone = flag
+        claimed = True
+    return ActionResult(
+        technique_id=action.technique_id,
+        command=action.command,
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
+        claimed_success=claimed,
+        claimed_outcome=("flag recovered" if claimed else ""),
+        state_transitions=transitions,
+        milestone=milestone,
+        cost=action.cost,
+    )
+
+
 class MockTarget(Target):
     """Deterministic offline target driven by an oracle function (no real execution)."""
 
@@ -101,27 +132,9 @@ class SubprocessBackend(Target):
             # Let ToolRunner turn this into a timed-out ActionResult (a tool error).
             raise TimeoutError(str(exc)) from exc
 
-        stdout, stderr = proc.stdout or "", proc.stderr or ""
-        transitions: list[StateTransition] = []
-        milestone: Optional[str] = None
-        claimed = False
-        blob = stdout + "\n" + stderr
-        if self.flag and self.flag in blob:
-            transitions.append(StateTransition(TransitionKind.MILESTONE_FLAG, self.flag))
-            milestone = self.flag
-            claimed = True
-
-        return ActionResult(
-            technique_id=action.technique_id,
-            command=action.command,
-            exit_code=proc.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            claimed_success=claimed,
-            claimed_outcome=("flag recovered" if claimed else ""),
-            state_transitions=transitions,
-            milestone=milestone,
-            cost=action.cost,
+        return result_from_output(
+            action, exit_code=proc.returncode,
+            stdout=proc.stdout or "", stderr=proc.stderr or "", flag=self.flag,
         )
 
 

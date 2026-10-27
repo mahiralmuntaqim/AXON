@@ -361,12 +361,42 @@ Each task's `root_node_id` points at the matching knowledge-pack triage node
 (`web::triage`, `crypto::triage`, …) when its category maps to a pack, so retrieval seeds from
 the right place; network-pentest tasks (AutoPenBench) start from the generic `root` RECON node.
 
-#### 5. Running a task (execution status)
+#### 5. Running a task live (execution bridge)
 
-`load_tasks()` is **real**. `start()` — spinning up the challenge container and driving the
-engagement loop against it — needs the full data plus a container runtime and is a
-**clearly-labeled stub** (`BenchmarkDataUnavailable`) in this build; wiring it is per-deployment
-work. `Vulhub` remains a pure stub (no data was provided for it).
+`load_tasks()` is **real** for all four. **XBOW / XBEN runs end to end**: an execution bridge
+([`axon/benchmark/bridge.py`](axon/benchmark/bridge.py)) brings up the challenge's
+`docker-compose` environment, drives the engagement loop against it with a real (frozen) LLM,
+synthesizes allowlisted tool commands, and checks the recovered flag.
+
+```bash
+# Needs Docker running + the XBOW data located (AXON_BENCH_ROOT), and an LLM key in the env var
+# named by your config (e.g. NVIDIA_API_KEY / OPENROUTER_API_KEY — never stored in the repo).
+python -m axon.cli benchmark-run --task XBEN-001-24 --toolbox --steps 40 \
+    --provider nvidia --model nvidia/llama-3.1-nemotron-70b-instruct \
+    --graph axon_kg.json --events bench_events.jsonl
+```
+
+- `--graph axon_kg.json` — the **persistent `G_K` snapshot**: loaded if it exists, saved after
+  the run, so learning (Beta `Q` updates + lessons) **accumulates across engagements**.
+- `--events bench_events.jsonl` — the read-only event log; open it in the
+  [visualizer](#watch-it-think--the-visualizer).
+
+**`--toolbox` — the dockerized attacker toolbox (recommended).** The agent does **not** run tools
+on the host (which usually has none installed). With `--toolbox`, allowlisted commands run
+**inside a container** built from [`axon/execution/toolbox/Dockerfile`](axon/execution/toolbox/Dockerfile)
+(`nmap`, `curl`, `ffuf`, `gobuster`, `feroxbuster`, `sqlmap`, `hydra`, `whatweb`, …), joined to
+the challenge's Docker network, so the tools actually exist and the target is reachable by its
+compose **service name**. The image builds automatically on first use (or build it yourself:
+`docker build -t axon-attacker-toolbox:latest axon/execution/toolbox`). Enable it via the flag or
+`execution.toolbox.enabled: true` in config. Without it, the backend runs on the host loopback
+port and needs the tools installed locally.
+
+Safety is unchanged: the **sandbox allowlist is still enforced before every command** — the
+toolbox only changes *where* an already-permitted, documented command runs, never *what* runs.
+
+The other three suites (`nyuctf`, `cybench`, `autopenbench`) expose `load_tasks()` +
+`challenge_detail()` but their live `start()` is still a **clearly-labeled stub** pending a
+per-benchmark bridge. `Vulhub` remains a pure stub (no data was provided for it).
 
 #### Adding another benchmark
 
@@ -438,12 +468,12 @@ axon/
   memory/       read (dense + PPR + folding) · verify (the gate) · write · lessons
   planning/     search (PUCT) · reversibility (the safety gate)
   llm/          frozen client (one call site) · prompts · flexible provider backends
-  execution/    sandbox allowlist · tool runner · result types
+  execution/    sandbox allowlist · tool runner · host + docker-toolbox backends · result types
   harness/      common benchmark interface · mock harness · benchmark stubs
   engagement/   the loop (Algorithm 1) · state/budget · events · replay · runner
-  benchmark/    NYU CTF / AutoPenBench / Cybench / XBOW adapters + committed task indices
+  benchmark/    NYU CTF / AutoPenBench / Cybench / XBOW adapters + indices + live XBOW bridge
   eval/         metrics · experiment_a · experiment_b · baselines
-  cli.py        construct / run / experiment-a / experiment-b / benchmarks / viz
+  cli.py        construct / run / experiment-a / experiment-b / benchmarks / benchmark-run / viz
   tests/        100 offline tests
 knowledge_packs/  six CTF/pentest packs (111 tools) — the graph's source content
 viz/              self-contained read-only visualizer (replay + live)
@@ -453,16 +483,18 @@ ARCHITECTURE.md · STATUS.md
 ## What is real vs. stubbed
 
 Everything above runs end to end **offline** — 100 tests pass, and the CLI solves the mock task,
-builds the real graph, and runs both experiments. The following are intentional, clearly-labeled
-stubs (see [STATUS.md](STATUS.md) for the full list); per the project's own rules, **no real
-benchmark is claimed to work until it has run a task end to end:**
+builds the real graph, and runs both experiments. **Live execution is real for XBOW/XBEN**: the
+real tool-execution backend (`SubprocessBackend` / `DockerExecBackend`) and the execution bridge
+drive the loop against a live challenge container, inside the dockerized attacker toolbox, with a
+real frozen LLM — verified outcomes write back to `G_K` (Beta `Q` + lessons) and persist across
+runs. The following remain intentional, clearly-labeled stubs (see [STATUS.md](STATUS.md)):
 
-- the real inference endpoint (`FrozenRemoteLLM`) and a real semantic embedder
-  (`SentenceTransformerEmbedder`) — the offline `HashingEmbedder` is real but lexical, not
-  semantic;
-- the real tool-execution backend (`SubprocessBackend`) that invokes allowlisted tools in a
-  sandboxed container;
-- the five benchmark adapters and the Pentest-R1 / CRAKEN baselines.
+- real inference endpoints ship via the [flexible LLM layer](#plug-in-any-llm-flexible-api); a
+  real semantic embedder (`SentenceTransformerEmbedder`) is still a stub — the offline
+  `HashingEmbedder` is real but lexical, not semantic (this causes cross-category retrieval drift
+  on live runs);
+- live `start()` for the other three suites (`nyuctf`, `cybench`, `autopenbench`) and `Vulhub`;
+- the Pentest-R1 / CRAKEN baselines.
 
 ## The seven hard rules
 
@@ -484,8 +516,9 @@ Plus: the **visualizer is read-only** — removing it changes no result of a run
   construction in `axon/knowledge/construct.py` is an interface to fill.
 - **Your own model / API:** set `llm.provider` in config, or register a backend — see
   [Plug in any LLM](#plug-in-any-llm-flexible-api). Nothing else changes.
-- **Your own embedder / tools / benchmark:** swap the embedder, implement `SubprocessBackend`,
-  or add a harness adapter behind the common interface.
+- **Your own embedder / tools / benchmark:** swap the embedder, extend the attacker toolbox
+  image, or add a harness adapter + execution bridge behind the common interface (the XBOW bridge
+  in `axon/benchmark/bridge.py` is the worked example).
 
 ## Disclaimer
 

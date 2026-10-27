@@ -47,12 +47,9 @@ benchmark is claimed to work** — only the mock harness has run a task end to e
   for offline runs; the old `FrozenRemoteLLM` placeholder is superseded.
 - `knowledge/embeddings.py::SentenceTransformerEmbedder` — real semantic embedder.
   (`HashingEmbedder` is real and used offline, but is not semantically strong.)
-- `execution/tools.py::SubprocessBackend` — real execution of allowlisted tools in a sandboxed
-  container. Must only run after `Sandbox.validate`; invokes known tools only, no payload
-  generation.
-- Benchmark **execution**: `axon/benchmark/*.start()` and `harness/stubs.py::vulhub` — running a
-  real task needs the full challenge data plus a container runtime. Task *loading* is real (see
-  below); execution is the remaining stub, so **no benchmark has run a task end to end** yet.
+- Benchmark **execution**: `nyuctf/autopenbench/cybench.start()` and `harness/stubs.py::vulhub`
+  remain stubs — each needs its own execution bridge. (XBOW `start()` is **real** now; task
+  *loading* is real for all four.)
 - `eval/baselines.py::PentestR1Baseline` and a CRAKEN static-RAG wiring helper.
 - `memory/read.py::fold_result` — head/tail folder; a real deployment can route folding
   through the LLM (contract unchanged: raw logs never reach working context).
@@ -69,15 +66,29 @@ contamination-minimized measure, and results code/report should say so.
 graph slot in without a rewrite. Construction is "an interface you fill"; `demo_seed_graph`
 is the built-in example used by the mock harness and tests.
 
-## Live execution bridge (update)
+## Live execution bridge + dockerized attacker toolbox (update)
 
-The XBOW execution bridge is now implemented — `execution/tools.py::SubprocessBackend` (real,
-sandbox-gated tool runner), `benchmark/bridge.py` (docker-compose up/down, port discovery,
-LLM command synthesis, flag check), and `XbowHarness.start()/teardown()`. It has run **end to
-end against a live XBEN-001-24 container** driven by a real NVIDIA model via
-`python -m axon.cli benchmark-run`. First run did **not solve** in 10 steps, but the whole
-pipeline executed: retrieval → PUCT selection → LLM command synthesis → sandboxed execution →
-verification gate (1 Beta write, Q 0.5→0.33 + lesson) → flag check. G_K now persists across runs
-via `--graph`. Remaining to actually solve: a dockerized attacker toolbox (the host lacks
-ffuf/gobuster/etc.), a real semantic embedder (to stop cross-category drift), and more steps.
-Cybench / NYU / AutoPenBench `start()` and Vulhub remain stubs.
+The XBOW execution bridge is implemented — `benchmark/bridge.py` (docker-compose up/down, port
+discovery, network discovery, LLM command synthesis, flag check), `XbowHarness.start()/teardown()`,
+and two real backends in `execution/`:
+
+- `tools.py::SubprocessBackend` — runs an allowlisted command on the host (needs host tools);
+- `docker_exec.py::DockerExecBackend` + `DockerToolbox` — **Option A**: runs each allowlisted
+  command *inside* an attacker-toolbox container (`execution/toolbox/Dockerfile`: nmap, curl,
+  ffuf, gobuster, feroxbuster, sqlmap, hydra, whatweb, dirb, …) joined to the challenge's Docker
+  network, so the tools exist and the target is reachable by compose service name. Enable with
+  `--toolbox` or `execution.toolbox.enabled: true`.
+
+Run: `python -m axon.cli benchmark-run --task XBEN-001-24 --toolbox --steps 40 --graph axon_kg.json`.
+
+**End-to-end live result (XBEN-001-24, 40 steps, toolbox, NVIDIA Nemotron-70B):** not solved
+(it's an IDOR/broken-authz challenge), but the full pipeline ran for real — **21 of 40 actions
+executed inside the container**, **19 verified outcomes → 19 Beta Q writebacks + lessons**
+(curl/ffuf/gobuster/feroxbuster all 0.5→0.33; a drifting misc edge collapsed 0.5→0.06). This is
+the paper's thesis working live: verified outcome → graph edit, no weights touched. G_K persists
+across runs via `--graph`.
+
+Known gaps to a first *solve*: (1) genuine-failure edges aren't exhausted, so one edge got
+re-selected ~14×; (2) the lexical `HashingEmbedder` causes cross-category retrieval drift (needs
+`SentenceTransformerEmbedder`); (3) LLM-synthesized commands don't crack an IDOR. Cybench / NYU /
+AutoPenBench `start()` and Vulhub remain stubs.

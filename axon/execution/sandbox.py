@@ -49,6 +49,15 @@ class Sandbox:
             allow_web_search=bool(ec.get("allow_web_search", False)),
         )
 
+    def allow_host(self, host: str) -> None:
+        """Permit an additional literal host (e.g. a challenge's compose service name).
+
+        Used by the execution bridge when the agent reaches the target over a Docker network by
+        service name rather than by IP. Narrow and explicit — it never opens a CIDR range.
+        """
+        if host:
+            self._literal_hosts.add(host.strip().lower())
+
     # -- host ----------------------------------------------------------------------------
     def host_allowed(self, host: str) -> bool:
         if not host:

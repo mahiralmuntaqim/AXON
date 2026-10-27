@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 import yaml
 
+from ..execution.docker_exec import DockerExecBackend, DockerToolbox
 from ..execution.sandbox import Sandbox
 from ..execution.tools import Action, SubprocessBackend
 from ..graph.episodic import EpisodicGraph
@@ -80,6 +81,35 @@ def web_port(project: str, challenge_dir: Path, service: str) -> Optional[int]:
     r = _compose(project, challenge_dir, "port", service, "80")
     m = re.search(r":(\d+)\s*$", (r.stdout or "").strip())
     return int(m.group(1)) if m else None
+
+
+def web_internal_port(challenge_dir: Path, service: str) -> int:
+    """The container-side port the web service listens on (for reaching it over the network)."""
+    compose = challenge_dir / "docker-compose.yml"
+    data = yaml.safe_load(compose.read_text(encoding="utf-8")) or {}
+    spec = (data.get("services", {}) or {}).get(service, {}) or {}
+    for p in spec.get("ports", []) or []:
+        # entries look like "80", "8080:80", "0:80", "127.0.0.1:8080:80" → container port last.
+        target = str(p).split(":")[-1].split("/")[0].strip()
+        if target.isdigit():
+            return int(target)
+    return 80
+
+
+def web_container_id(project: str, challenge_dir: Path, service: str) -> Optional[str]:
+    r = _compose(project, challenge_dir, "ps", "-q", service, timeout=60)
+    cid = (r.stdout or "").strip().splitlines()
+    return cid[0] if cid else None
+
+
+def container_networks(container_id: str) -> list[str]:
+    """Names of every Docker network a container is attached to."""
+    r = subprocess.run(
+        ["docker", "inspect", "-f",
+         "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}\n{{end}}", container_id],
+        capture_output=True, text=True, timeout=60,
+    )
+    return [n.strip() for n in (r.stdout or "").splitlines() if n.strip()]
 
 
 # --------------------------------------------------------------------------------------------
@@ -159,17 +189,53 @@ def make_xbow_env(
         raise RuntimeError(f"could not find a web service in {challenge_dir}/docker-compose.yml")
 
     compose_up(project, challenge_dir, flag)
-    port = web_port(project, challenge_dir, service)
-    if port is None:
-        compose_down(project, challenge_dir)
-        raise RuntimeError("could not determine the challenge's mapped web port")
-
-    host = "127.0.0.1"
-    target_url = f"http://{host}:{port}"
     sandbox = Sandbox.from_config(cfg)
     timeout_s = float(cfg.get("engagement", {}).get("per_action_timeout_s", 120))
+    tb_cfg = (cfg.get("execution", {}) or {}).get("toolbox", {}) or {}
 
-    backend = SubprocessBackend(flag=flag, timeout_s=timeout_s, bash=(os.name == "nt"))
+    toolbox: Optional[DockerToolbox] = None
+    if tb_cfg.get("enabled"):
+        # Option A: run tools inside a toolbox container on the challenge's network. The target
+        # is reached by its compose service name on its internal port — no host tools needed.
+        cid = web_container_id(project, challenge_dir, service)
+        if cid is None:
+            compose_down(project, challenge_dir)
+            raise RuntimeError(f"could not find the running container for service {service!r}")
+        networks = container_networks(cid)
+        internal_port = web_internal_port(challenge_dir, service)
+        host = service
+        target_url = f"http://{service}:{internal_port}"
+        # Permit the service name as a target host on BOTH sandboxes: this factory's, and the
+        # one run_engagement builds from cfg (so add it to cfg's allowlist too).
+        sandbox.allow_host(service)
+        ec = cfg.setdefault("execution", {})
+        hosts = list(ec.get("allowed_target_hosts", []))
+        if service not in hosts:
+            ec["allowed_target_hosts"] = hosts + [service]
+        toolbox = DockerToolbox(
+            tb_cfg.get("image", "axon-attacker-toolbox:latest"),
+            name=f"axon-toolbox-{project}",
+            build_context=Path(__file__).resolve().parents[1] / "execution" / "toolbox",
+            build=bool(tb_cfg.get("build", True)),
+        )
+        try:
+            toolbox.ensure_image()
+            toolbox.start(networks)
+        except Exception:
+            toolbox.stop()
+            compose_down(project, challenge_dir)
+            raise
+        backend: object = DockerExecBackend(toolbox.name, flag=flag, timeout_s=timeout_s)
+        port = internal_port
+    else:
+        # Fallback: run on the host against the published loopback port (needs host tools).
+        port = web_port(project, challenge_dir, service)
+        if port is None:
+            compose_down(project, challenge_dir)
+            raise RuntimeError("could not determine the challenge's mapped web port")
+        host = "127.0.0.1"
+        target_url = f"http://{host}:{port}"
+        backend = SubprocessBackend(flag=flag, timeout_s=timeout_s, bash=(os.name == "nt"))
 
     episodic = EpisodicGraph(task.task_id)
     episodic.add_fact(
@@ -190,6 +256,8 @@ def make_xbow_env(
     )
 
     def teardown() -> None:
+        if toolbox is not None:
+            toolbox.stop()
         compose_down(project, challenge_dir)
 
     return env, teardown

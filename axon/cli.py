@@ -135,6 +135,9 @@ def cmd_benchmark_run(args: argparse.Namespace) -> None:
     # A benchmark container is disposable (compose down -v fully resets it), so actions are
     # effectively reversible — relax the irreversibility floor for the run.
     cfg.setdefault("safety", {})["q_min"] = args.q_min
+    if args.toolbox:
+        # Option A: run allowlisted tools inside the dockerized attacker toolbox.
+        cfg.setdefault("execution", {}).setdefault("toolbox", {})["enabled"] = True
 
     emb = _embedder(cfg)
     # Persistent G_K: load the accumulating snapshot if it exists, else seed from the packs.
@@ -220,6 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     br.add_argument("--q-min", dest="q_min", type=float, default=0.0)
     br.add_argument("--graph", default="axon_kg.json",
                     help="persistent G_K snapshot: loaded if present, saved after (learning accumulates)")
+    br.add_argument("--toolbox", action="store_true",
+                    help="run allowlisted tools inside the dockerized attacker toolbox (Option A)")
     br.add_argument("--events", default="bench_events.jsonl")
     br.set_defaults(func=cmd_benchmark_run)
 

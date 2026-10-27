@@ -65,6 +65,12 @@ execution:
   # Sandbox allowlist. Only these target host patterns and tools may run. Nothing live,
   # nothing third-party. See SEGMENT 10 / SEGMENT 12.
   allow_web_search: false     # MUST stay false during evaluation (contamination channel)
+  # Option A: run allowlisted tools INSIDE a dockerized attacker toolbox joined to the
+  # challenge network (so the tools actually exist and the target is reachable by service name).
+  toolbox:
+    enabled: false            # set true (or pass --toolbox) to use the container toolbox
+    image: axon-attacker-toolbox:latest
+    build: true               # build the image from axon/execution/toolbox/ if it is missing
   allowed_target_hosts:
     - "127.0.0.1"
     - "localhost"
@@ -85,6 +91,14 @@ execution:
     - python3
     - python
     - jq
+    - feroxbuster
+    - frida
+    - frida-trace
+    - dirb
+    - whatweb
+    - wpscan
+    - netcat
+    - nc
 
 eval:
   seeds: [0, 1, 2]            # report variance across seeds
