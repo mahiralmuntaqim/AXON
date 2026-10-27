@@ -66,3 +66,14 @@ def test_start_is_a_labeled_stub():
 def test_autopenbench_tasks_start_from_root():
     tasks = get_harness("autopenbench").load_tasks()
     assert all(t.root_node_id == "root" for t in tasks)
+
+
+def test_nyuctf_challenge_detail_when_data_present():
+    h = get_harness("nyuctf")
+    if h.data_root() is None:
+        pytest.skip("NYU data not located (set AXON_BENCH_ROOT)")
+    task = h.load_tasks()[0]
+    detail = h.challenge_detail(task)
+    assert detail is not None
+    assert "name" in detail and "description" in detail
+    assert "_networked" in detail  # tells the runner whether to bring up docker-compose

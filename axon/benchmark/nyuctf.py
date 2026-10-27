@@ -7,6 +7,10 @@ construction (the firewall guards the graph, not the benchmark tasks).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Optional
+
 from ..harness.base import Task
 from .base_loader import BenchmarkHarnessBase
 
@@ -33,3 +37,30 @@ class NyuCtfHarness(BenchmarkHarnessBase):
                 "path": entry.get("path", ""),
             },
         )
+
+    # -- local challenge access (needs the full data repo, located via paths.py) -----------
+    def challenge_dir(self, task: Task) -> Optional[Path]:
+        """Absolute path to this task's challenge folder in the data repo, or None."""
+        root = self.data_root()
+        rel = task.metadata.get("path")
+        if root is None or not rel:
+            return None
+        d = root / rel
+        return d if d.is_dir() else None
+
+    def challenge_detail(self, task: Task) -> Optional[dict]:
+        """Full local ``challenge.json`` (name, description, box, files, flag), or None.
+
+        Read from local data only — this carries the flag, so it is NEVER committed (the
+        shipped index is metadata-only). Use it to actually attempt a challenge.
+        """
+        d = self.challenge_dir(task)
+        if d is None:
+            return None
+        cj = d / "challenge.json"
+        if not cj.is_file():
+            return None
+        detail = json.loads(cj.read_text(encoding="utf-8"))
+        detail["_dir"] = str(d)
+        detail["_networked"] = (d / "docker-compose.yml").is_file()
+        return detail
